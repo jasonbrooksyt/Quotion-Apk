@@ -3,7 +3,7 @@
 const CACHE_NAME = 'quotation-generator-v2';
 const APP_SHELL = [
   './', './index.html', './style.css', './app.js', './utils.js', './storage.js',
-  './file-saver.js', './logo-data.js', './pdf-export.js', './docx-export.js',
+  './file-saver.js', './logo-data.js', './signature-data.js', './pdf-export.js', './docx-export.js',
   './manifest.json', './icon-192.png', './icon-512.png',
   './jspdf.umd.min.js', './docx.umd.js',
 ];

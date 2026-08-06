@@ -115,7 +115,7 @@ const PdfExport = (function () {
     if (data.customer.name) billLines.push({ text: data.customer.name, bold: true });
     if (data.customer.address) {
       doc.setFontSize(9);
-      const wrapped = doc.splitTextToSize(data.customer.address, CONTENT_W - 4);
+      const wrapped = doc.splitTextToSize(data.customer.address, CONTENT_W * 0.55);
       wrapped.forEach((l) => billLines.push({ text: l, bold: false }));
     }
     if (data.customer.gstin) billLines.push({ text: `GSTIN :- ${data.customer.gstin}`, bold: false });
@@ -170,14 +170,14 @@ const PdfExport = (function () {
   // Column layout (mm), total = CONTENT_W (186)
   const COLS = [
     { key: 'sno', label: 'Sr.No.', w: 10, align: 'center' },
-    { key: 'desc', label: 'Material / Service Description', w: 56, align: 'left' },
+    { key: 'desc', label: 'Material / Service Description', w: 64, align: 'left' },
     { key: 'hsn', label: 'HSN/SAC', w: 16, align: 'center' },
     { key: 'qty', label: 'Qty.', w: 12, align: 'center' },
     { key: 'rate', label: 'Unit Rate', w: 18, align: 'right' },
     { key: 'disc', label: 'Disc.%', w: 12, align: 'center' },
     { key: 'gst', label: 'GST%', w: 12, align: 'center' },
     { key: 'gstAmt', label: 'GST Amt', w: 18, align: 'right' },
-    { key: 'total', label: 'Amount', w: 20, align: 'right' },
+    { key: 'total', label: 'Amount', w: 24, align: 'right' },
   ];
 
   function colX(idx) {
@@ -355,16 +355,27 @@ const PdfExport = (function () {
     }
 
     // Bottom signatory strip, bordered like the invoice's closing block
-    y = ensureSpace(doc, y, 26);
+    y = ensureSpace(doc, y, 40);
     y += 4;
     const sigBoxTop = y;
-    const sigBoxH = 22;
+    const sigBoxH = 36;
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.3);
     doc.rect(MARGIN, sigBoxTop, CONTENT_W, sigBoxH);
     doc.setFont(undefined, 'bold');
     doc.setFontSize(9);
     doc.text(`FOR ${(data.company.name || 'COMPANY').toUpperCase()}`, PAGE_W - MARGIN - 3, sigBoxTop + 6, { align: 'right' });
+
+    const stampW = 22;
+    const stampH = 22 * 1111 / 1416;
+    if (typeof SIGNATURE_DATA_URI !== 'undefined' && SIGNATURE_DATA_URI) {
+      try {
+        doc.addImage(SIGNATURE_DATA_URI, 'JPEG', PAGE_W - MARGIN - 3 - stampW, sigBoxTop + 9, stampW, stampH);
+      } catch (e) {
+        // if the stamp fails to embed for any reason, keep going without it
+      }
+    }
+
     doc.setFont(undefined, 'normal');
     doc.setFontSize(8.5);
     doc.text('Authorised Signatory', PAGE_W - MARGIN - 3, sigBoxTop + sigBoxH - 3, { align: 'right' });

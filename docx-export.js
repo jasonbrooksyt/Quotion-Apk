@@ -87,7 +87,9 @@ const DocxExport = (function () {
 
     const billParas = [p('To,', { bold: true, size: 18 })];
     if (data.customer.name) billParas.push(p(data.customer.name, { bold: true, size: 18 }));
-    if (data.customer.address) billParas.push(p(data.customer.address, { size: 18 }));
+    if (data.customer.address) {
+      Utils.wrapText(data.customer.address, 55).forEach((line) => billParas.push(p(line, { size: 18 })));
+    }
     if (data.customer.gstin) billParas.push(p(`GSTIN :- ${data.customer.gstin}`, { size: 18 }));
     if (data.customer.contact) billParas.push(p(`Kind Attn.: ${data.customer.contact}`, { size: 18 }));
     if (data.meta.subject) billParas.push(p(`Subject: ${data.meta.subject}`, { size: 18, bold: true }));
@@ -102,7 +104,7 @@ const DocxExport = (function () {
 
     // ---------- Item table ----------
 
-    const COLW = { sno: 500, desc: 3100, hsn: 900, qty: 700, rate: 1100, disc: 700, gst: 700, gstamt: 1100, total: 1200 };
+    const COLW = { sno: 500, desc: 3600, hsn: 900, qty: 700, rate: 1100, disc: 700, gst: 700, gstamt: 1100, total: 1200 };
 
     const headerRow = new TableRow({
       tableHeader: true,
@@ -203,6 +205,24 @@ const DocxExport = (function () {
 
     children.push(p('', { size: 4 }));
 
+    const signatureChildren = [
+      p(`FOR ${(data.company.name || 'COMPANY').toUpperCase()}`, { bold: true, size: 18, align: AlignmentType.RIGHT }),
+    ];
+    if (typeof SIGNATURE_DATA_URI !== 'undefined' && SIGNATURE_DATA_URI) {
+      try {
+        signatureChildren.push(new Paragraph({
+          alignment: AlignmentType.RIGHT,
+          children: [new ImageRun({ type: 'jpg', data: SIGNATURE_DATA_URI, transformation: { width: 85, height: Math.round(85 * 1111 / 1416) } })],
+        }));
+      } catch (e) {
+        // if the stamp fails to embed for any reason, keep going without it
+        signatureChildren.push(p('', { size: 4 }), p('', { size: 4 }));
+      }
+    } else {
+      signatureChildren.push(p('', { size: 4 }), p('', { size: 4 }));
+    }
+    signatureChildren.push(p('Authorised Signatory', { size: 16, align: AlignmentType.RIGHT }));
+
     const signatureTable = new Table({
       width: { size: TOTAL_W, type: WidthType.DXA },
       rows: [new TableRow({
@@ -210,12 +230,7 @@ const DocxExport = (function () {
           width: { size: TOTAL_W, type: WidthType.DXA },
           borders,
           margins: { top: 200, bottom: 200, left: 120, right: 120 },
-          children: [
-            p(`FOR ${(data.company.name || 'COMPANY').toUpperCase()}`, { bold: true, size: 18, align: AlignmentType.RIGHT }),
-            p('', { size: 4 }),
-            p('', { size: 4 }),
-            p('Authorised Signatory', { size: 16, align: AlignmentType.RIGHT }),
-          ],
+          children: signatureChildren,
         })],
       })],
     });

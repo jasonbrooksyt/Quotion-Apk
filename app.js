@@ -435,6 +435,7 @@ const QGenApp = (function () {
       document.getElementById('quoteDate').value = Utils.todayISO();
       document.getElementById('quoteNo').value = Utils.nextQuotationNumber(Storage.getLastQuoteNo());
       document.getElementById('validityDays').value = 30;
+      document.getElementById('termsText').value = DEFAULT_TERMS;
       addItem();
       recalcAll();
     });

@@ -10,6 +10,13 @@ const COMPANY = {
   email: 'kanakmechanical.fab@gmail.com',
 };
 
+const DEFAULT_TERMS = [
+  'Taxes 18% GST Extra.',
+  'Work Completion: - 30 days from date of receipts of your purchase order.',
+  'Payment condition: - 100% within 30 days after delivery.',
+  'Validity: - the offer is valid for period of 15 days from the date of the offer.',
+].join('\n');
+
 const Utils = (function () {
 
   function round2(n) {
@@ -103,5 +110,23 @@ const Utils = (function () {
     }[c]));
   }
 
-  return { round2, fmtMoney, todayISO, formatDateDMY, addDaysISO, amountInWords, nextQuotationNumber, escapeHtml };
+  function wrapText(text, maxCharsPerLine) {
+    if (!text) return [];
+    const words = String(text).split(/\s+/).filter(Boolean);
+    const lines = [];
+    let current = '';
+    words.forEach((word) => {
+      const candidate = current ? current + ' ' + word : word;
+      if (candidate.length > maxCharsPerLine && current) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = candidate;
+      }
+    });
+    if (current) lines.push(current);
+    return lines;
+  }
+
+  return { round2, fmtMoney, todayISO, formatDateDMY, addDaysISO, amountInWords, nextQuotationNumber, escapeHtml, wrapText };
 })();
