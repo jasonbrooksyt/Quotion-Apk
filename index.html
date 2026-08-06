@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<meta name="theme-color" content="#1a56db" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Quotation Generator" />
+<title>Quotation Generator</title>
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icon-192.png" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="app-header">
+  <h1>Quotation Generator</h1>
+  <span class="app-header__tag">Offline &middot; No login</span>
+</header>
+
+<main class="container">
+
+  <div id="errorBanner" class="error-banner hidden"></div>
+  <div id="storageWarning" class="storage-warning hidden">
+    ⚠ This browser is blocking on-device saving right now — Save Customer, Quotation History, and draft
+    auto-save won't retain anything between taps. Downloading the PDF/Word file still works fine.
+  </div>
+
+  <!-- CUSTOMER DETAILS -->
+  <section class="card">
+    <h2 class="card__title">Customer Details</h2>
+    <label>Saved Customers
+      <select id="savedCustomerPicker">
+        <option value="">— Select a saved customer —</option>
+      </select>
+    </label>
+    <label>Customer / Company Name <span class="req">*</span>
+      <input type="text" id="custName" placeholder="Customer name" required />
+    </label>
+    <label>Address
+      <textarea id="custAddress" rows="2" placeholder="Customer address"></textarea>
+    </label>
+    <div class="grid2">
+      <label>GSTIN
+        <input type="text" id="custGstin" placeholder="Customer GSTIN" />
+      </label>
+      <label>Contact Person
+        <input type="text" id="custContact" placeholder="Attn. name" />
+      </label>
+    </div>
+    <div class="grid2">
+      <button class="btn btn--secondary" id="saveCustomerBtn" type="button">Save Customer</button>
+      <button class="btn btn--ghost" id="deleteCustomerBtn" type="button">Delete Saved</button>
+    </div>
+  </section>
+
+  <!-- QUOTATION META -->
+  <section class="card">
+    <h2 class="card__title">Quotation Details</h2>
+    <div class="grid2">
+      <label>Quotation No.
+        <input type="text" id="quoteNo" />
+      </label>
+      <label>Date
+        <input type="date" id="quoteDate" />
+      </label>
+    </div>
+    <label>Validity (days)
+      <input type="number" id="validityDays" value="30" min="1" />
+    </label>
+    <div class="grid2">
+      <label>GST Type
+        <select id="gstType">
+          <option value="CGST_SGST">CGST + SGST</option>
+          <option value="IGST">IGST</option>
+        </select>
+      </label>
+      <label>Currency
+        <select id="currency">
+          <option value="INR" selected>₹ INR</option>
+          <option value="USD">$ USD</option>
+        </select>
+      </label>
+    </div>
+    <label>Subject
+      <input type="text" id="subject" placeholder="e.g. Quotation for SS Fabrication Work" />
+    </label>
+  </section>
+
+  <!-- ITEMS -->
+  <section class="card">
+    <h2 class="card__title">Items</h2>
+    <div id="itemsWrap"></div>
+    <button class="btn btn--secondary" id="addItemBtn" type="button">+ Add Item</button>
+  </section>
+
+  <!-- CHARGES -->
+  <section class="card">
+    <h2 class="card__title">Additional Charges & Discount</h2>
+    <div class="grid2">
+      <label>Freight
+        <input type="number" id="chargeFreight" value="0" min="0" step="0.01" />
+      </label>
+      <label>Insurance
+        <input type="number" id="chargeInsurance" value="0" min="0" step="0.01" />
+      </label>
+    </div>
+    <div class="grid2">
+      <label>Loading Charges
+        <input type="number" id="chargeLoading" value="0" min="0" step="0.01" />
+      </label>
+      <label>Unloading Charges
+        <input type="number" id="chargeUnloading" value="0" min="0" step="0.01" />
+      </label>
+    </div>
+    <label>Overall Discount (flat amount, applied after tax)
+      <input type="number" id="overallDiscount" value="0" min="0" step="0.01" />
+    </label>
+    <p class="hint">Note: Freight/Insurance/Loading/Unloading are added after tax as flat amounts in this version — they are not separately taxed. If any of these need their own GST, add them as a line item instead.</p>
+  </section>
+
+  <!-- TERMS -->
+  <section class="card">
+    <h2 class="card__title">Terms & Notes</h2>
+    <div class="grid2">
+      <label>Delivery Time
+        <input type="text" id="deliveryTime" placeholder="e.g. 30 days from PO" />
+      </label>
+      <label>Payment Terms
+        <input type="text" id="paymentTerms" placeholder="e.g. 100% within 30 days" />
+      </label>
+    </div>
+    <label>Remarks
+      <textarea id="remarks" rows="2" placeholder="Any additional remarks"></textarea>
+    </label>
+    <label>Terms & Conditions (one per line)
+      <textarea id="termsText" rows="4"></textarea>
+    </label>
+  </section>
+
+  <!-- SUMMARY -->
+  <section class="card summary-card">
+    <h2 class="card__title">Summary</h2>
+    <div class="summary-row"><span>Taxable Amount</span><strong id="sumTaxable">0.00</strong></div>
+    <div class="summary-row" id="sumCgstRow"><span>CGST</span><strong id="sumCgst">0.00</strong></div>
+    <div class="summary-row" id="sumSgstRow"><span>SGST</span><strong id="sumSgst">0.00</strong></div>
+    <div class="summary-row" id="sumIgstRow" style="display:none"><span>IGST</span><strong id="sumIgst">0.00</strong></div>
+    <div class="summary-row"><span>Charges (Freight/Ins/Load/Unload)</span><strong id="sumCharges">0.00</strong></div>
+    <div class="summary-row"><span>Overall Discount</span><strong id="sumDiscount">0.00</strong></div>
+    <div class="summary-row"><span>Round Off</span><strong id="sumRound">0.00</strong></div>
+    <div class="summary-row summary-row--total"><span>Grand Total</span><strong id="sumGrand">0.00</strong></div>
+    <p class="amount-words" id="sumWords"></p>
+  </section>
+
+  <div class="action-bar">
+    <button class="btn btn--primary" id="genPdfBtn" type="button">Download PDF</button>
+    <button class="btn btn--primary" id="genDocxBtn" type="button">Download Word</button>
+    <button class="btn btn--ghost" id="clearBtn" type="button">Clear Form</button>
+  </div>
+
+  <p class="footer-note">Draft auto-saves to this phone's browser storage. Nothing leaves your device.</p>
+
+  <!-- HISTORY -->
+  <section class="card">
+    <h2 class="card__title">Previous Quotations</h2>
+    <div id="historyList" class="history-list">
+      <p class="hint">Generated quotations will appear here for editing.</p>
+    </div>
+  </section>
+
+</main>
+
+<div id="itemRowTemplate" class="hidden">
+  <div class="item-row" data-row>
+    <div class="item-row__head">
+      <span class="item-row__sno"></span>
+      <div class="item-row__actions">
+        <button type="button" class="icon-btn" data-action="dup" title="Duplicate">⧉</button>
+        <button type="button" class="icon-btn" data-action="up" title="Move up">↑</button>
+        <button type="button" class="icon-btn" data-action="down" title="Move down">↓</button>
+        <button type="button" class="icon-btn icon-btn--danger" data-action="del" title="Delete">✕</button>
+      </div>
+    </div>
+    <label>Description <span class="req">*</span>
+      <textarea rows="2" data-field="desc" placeholder="Item description"></textarea>
+    </label>
+    <div class="grid3">
+      <label>HSN/SAC
+        <input type="text" data-field="hsn" placeholder="Optional" />
+      </label>
+      <label>Unit
+        <select data-field="unit">
+          <option>Nos</option>
+          <option>Kg</option>
+          <option>Ltr</option>
+          <option>Mtr</option>
+          <option>Set</option>
+          <option>Job</option>
+          <option>Day</option>
+        </select>
+      </label>
+      <label>Qty <span class="req">*</span>
+        <input type="number" data-field="qty" value="1" min="0" step="0.01" />
+      </label>
+    </div>
+    <div class="grid3">
+      <label>Rate <span class="req">*</span>
+        <input type="number" data-field="rate" value="0" min="0" step="0.01" />
+      </label>
+      <label>Discount %
+        <input type="number" data-field="disc" value="0" min="0" max="100" step="0.01" />
+      </label>
+      <label>GST %
+        <input type="number" data-field="gst" value="18" min="0" max="100" step="0.01" />
+      </label>
+    </div>
+    <div class="item-row__amount">Line Total: <strong data-field="lineTotal">0.00</strong></div>
+  </div>
+</div>
+
+<script src="jspdf.umd.min.js"></script>
+<script src="docx.umd.js"></script>
+<script src="utils.js"></script>
+<script src="storage.js"></script>
+<script src="file-saver.js"></script>
+<script src="logo-data.js"></script>
+<script src="pdf-export.js"></script>
+<script src="docx-export.js"></script>
+<script src="app.js"></script>
+
+<script>if ("serviceWorker" in navigator) { window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {})); }</script>
+</body>
+</html>
