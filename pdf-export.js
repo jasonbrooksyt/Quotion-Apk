@@ -17,6 +17,12 @@ const PdfExport = (function () {
     let y = MARGIN;
     y = drawHeaderBox(doc, data, y);
     y = drawItemsTable(doc, data, y);
+
+    // Push totals/terms/signature down so the quotation fills the A4 page
+    const bottomH = estimateBottomHeight(data);
+    const minY = PAGE_H - MARGIN - bottomH;
+    if (y < minY) y = minY;
+
     y = drawTotalsAndWords(doc, data, y);
     y = drawTermsAndSignature(doc, data, y);
 
@@ -241,22 +247,44 @@ const PdfExport = (function () {
     return y;
   }
 
+
+  function estimateBottomHeight(data) {
+    const t = data.totals;
+    let rows = 2; // taxable + grand total
+    if (data.meta.gstType === 'IGST') rows += 1;
+    else rows += 2;
+    if (t.chargesTotal) rows += 1;
+    if (data.overallDiscount) rows += 1;
+    if (t.roundOff) rows += 1;
+    const totalsH = rows * 6.5 + 2;
+    const wordsH = 14;
+    let termsH = 8;
+    if (data.terms && data.terms.termsText) {
+      termsH += data.terms.termsText.length * 5 + 6;
+    }
+    const sigH = 42;
+    return totalsH + wordsH + termsH + sigH + 8;
+  }
+
   // ---- Totals box + Amount in Words (styled like the invoice's bottom section) ----
 
   function drawTotalsAndWords(doc, data, y) {
-    // Extra gap between items table and amount section so layout fills the page better
-    y += 22;
     y = ensureSpace(doc, y, 50);
     const t = data.totals;
 
     const boxW = 75, boxX = PAGE_W - MARGIN - boxW;
     const rowH = 6.5;
+    // Derive display GST rate from line items
+    const gstRates = (t.computed || []).map((it) => Number(it.gst) || 0).filter((r) => r > 0);
+    const mainGst = gstRates.length ? gstRates[0] : 18;
+    const halfGst = Utils.round2(mainGst / 2);
+
     const rows = [['Taxable Amount', Utils.fmtMoney(t.taxable)]];
     if (data.meta.gstType === 'IGST') {
-      rows.push(['IGST', Utils.fmtMoney(t.igst)]);
+      rows.push(['IGST ' + mainGst + '%', Utils.fmtMoney(t.igst)]);
     } else {
-      rows.push(['CGST', Utils.fmtMoney(t.cgst)]);
-      rows.push(['SGST', Utils.fmtMoney(t.sgst)]);
+      rows.push(['CGST ' + halfGst + '%', Utils.fmtMoney(t.cgst)]);
+      rows.push(['SGST ' + halfGst + '%', Utils.fmtMoney(t.sgst)]);
     }
     if (t.chargesTotal) rows.push(['Add. Charges', Utils.fmtMoney(t.chargesTotal)]);
     if (data.overallDiscount) rows.push(['Discount', '-' + Utils.fmtMoney(data.overallDiscount)]);

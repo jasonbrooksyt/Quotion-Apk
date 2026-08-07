@@ -136,12 +136,15 @@ const DocxExport = (function () {
     // ---------- Totals block (right-aligned figures) then Amount in Words below ----------
 
     const t = data.totals;
+    const gstRates = (t.computed || []).map((it) => Number(it.gst) || 0).filter((r) => r > 0);
+    const mainGst = gstRates.length ? gstRates[0] : 18;
+    const halfGst = Utils.round2(mainGst / 2);
     const totalsLines = [[`Taxable Amount`, Utils.fmtMoney(t.taxable)]];
     if (data.meta.gstType === 'IGST') {
-      totalsLines.push(['IGST', Utils.fmtMoney(t.igst)]);
+      totalsLines.push(['IGST ' + mainGst + '%', Utils.fmtMoney(t.igst)]);
     } else {
-      totalsLines.push(['CGST', Utils.fmtMoney(t.cgst)]);
-      totalsLines.push(['SGST', Utils.fmtMoney(t.sgst)]);
+      totalsLines.push(['CGST ' + halfGst + '%', Utils.fmtMoney(t.cgst)]);
+      totalsLines.push(['SGST ' + halfGst + '%', Utils.fmtMoney(t.sgst)]);
     }
     if (t.chargesTotal) totalsLines.push(['Add. Charges', Utils.fmtMoney(t.chargesTotal)]);
     if (data.overallDiscount) totalsLines.push(['Discount', '-' + Utils.fmtMoney(data.overallDiscount)]);

@@ -139,15 +139,22 @@ const QGenApp = (function () {
     const cgstRow = document.getElementById('sumCgstRow');
     const sgstRow = document.getElementById('sumSgstRow');
     const igstRow = document.getElementById('sumIgstRow');
+    // Show rate in summary labels (e.g. CGST 9%)
+    const rates = (totals.computed || []).map((it) => Number(it.gst) || 0).filter((r) => r > 0);
+    const mainGst = rates.length ? rates[0] : 18;
+    const half = Utils.round2(mainGst / 2);
     if (gstType === 'IGST') {
       cgstRow.style.display = 'none';
       sgstRow.style.display = 'none';
       igstRow.style.display = 'flex';
+      igstRow.querySelector('span').textContent = 'IGST ' + mainGst + '%';
       document.getElementById('sumIgst').textContent = Utils.fmtMoney(totals.igst);
     } else {
       cgstRow.style.display = 'flex';
       sgstRow.style.display = 'flex';
       igstRow.style.display = 'none';
+      cgstRow.querySelector('span').textContent = 'CGST ' + half + '%';
+      sgstRow.querySelector('span').textContent = 'SGST ' + half + '%';
       document.getElementById('sumCgst').textContent = Utils.fmtMoney(totals.cgst);
       document.getElementById('sumSgst').textContent = Utils.fmtMoney(totals.sgst);
     }
