@@ -138,14 +138,6 @@ const PdfExport = (function () {
     y += rBillH;
     hLine(doc, y);
 
-    // Row: Valid Until — this row's bottom border doubles as the box bottom
-    const rValidH = 7;
-    doc.setFont(undefined, 'bold');
-    doc.setFontSize(9);
-    doc.text(`Valid Until :- ${Utils.formatDateDMY(data.meta.validUntil)}`, MARGIN + 2, y + rValidH / 2 + 1.3);
-    doc.setFont(undefined, 'normal');
-    y += rValidH;
-
     // Outer border around the whole header box
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.4);
@@ -293,26 +285,21 @@ const PdfExport = (function () {
 
     const boxBottom = ry;
 
-    // Amount in Words bar spans full width, aligned to the bottom of the totals box
+    // Amount in Words — full-width bar BELOW the totals box (not beside it)
     const currencyLabel = data.meta.currency === 'USD' ? 'US Dollars' : 'Rupees';
     const wordsText = Utils.amountInWords(t.finalAmount, currencyLabel);
     doc.setFontSize(8);
-    const wLines = doc.splitTextToSize(wordsText, CONTENT_W - boxW - 8);
-    const wordsRowH = Math.max(boxBottom - boxTop, wLines.length * 4 + 4);
+    const wLines = doc.splitTextToSize(wordsText, CONTENT_W - 4);
+    const wordsRowH = wLines.length * 4 + 5;
 
     doc.setFillColor(224, 234, 246);
-    doc.rect(MARGIN, boxTop, CONTENT_W - boxW, wordsRowH, 'FD');
+    doc.rect(MARGIN, boxBottom, CONTENT_W, wordsRowH, 'FD');
     doc.setFont(undefined, 'bold');
-    doc.text('Amount in Words :-', MARGIN + 2, boxTop + 4.5);
+    doc.text('Amount in Words :-', MARGIN + 2, boxBottom + 4.5);
     doc.setFont(undefined, 'normal');
-    doc.text(wLines, MARGIN + 2, boxTop + 9);
+    doc.text(wLines, MARGIN + 2, boxBottom + 4.5 + wLines.length * 4);
 
-    // if the totals box ended up shorter than the words bar, extend its outer border
-    if (wordsRowH > (boxBottom - boxTop)) {
-      doc.rect(boxX, boxTop, boxW, wordsRowH);
-    }
-
-    return boxTop + Math.max(wordsRowH, boxBottom - boxTop) + 4;
+    return boxBottom + wordsRowH + 4;
   }
 
   function drawTermsAndSignature(doc, data, y) {
@@ -320,23 +307,6 @@ const PdfExport = (function () {
     doc.setFontSize(9);
     doc.setTextColor(20, 20, 20);
     doc.setFont(undefined, 'bold');
-
-    if (data.terms.remarks) {
-      doc.text('Remarks:', MARGIN, y);
-      doc.setFont(undefined, 'normal');
-      const lines = doc.splitTextToSize(data.terms.remarks, CONTENT_W);
-      doc.text(lines, MARGIN, y + 4);
-      y += 4 + lines.length * 4;
-      doc.setFont(undefined, 'bold');
-    }
-
-    if (data.terms.deliveryTime || data.terms.paymentTerms) {
-      y += 2;
-      doc.setFontSize(8.5);
-      if (data.terms.deliveryTime) { doc.text(`Delivery Time: ${data.terms.deliveryTime}`, MARGIN, y); y += 4.2; }
-      doc.setFont(undefined, 'normal');
-      if (data.terms.paymentTerms) { doc.text(`Payment Terms: ${data.terms.paymentTerms}`, MARGIN, y); y += 4.2; }
-    }
 
     if (data.terms.termsText && data.terms.termsText.length) {
       y += 3;
