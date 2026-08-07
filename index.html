@@ -16,6 +16,21 @@
 </head>
 <body>
 
+<div id="loginScreen" class="login-screen">
+  <div class="login-card">
+    <img src="icon-192.png" alt="KMF" class="login-logo" width="64" height="64" />
+    <h1>Kanak Mechanicals</h1>
+    <p class="login-sub">Quotation Generator</p>
+    <label class="login-label">Enter PIN
+      <input type="password" id="pinInput" inputmode="numeric" maxlength="8" placeholder="••••••" autocomplete="off" />
+    </label>
+    <p id="pinError" class="login-error hidden">Wrong PIN. Try again.</p>
+    <button type="button" class="btn btn--primary" id="pinSubmitBtn">Unlock</button>
+  </div>
+</div>
+
+
+<div id="appShell" class="app-shell hidden">
 <header class="app-header">
   <div class="app-header__brand">
     <img class="app-header__logo" src="icon-192.png" alt="KMF Logo" width="44" height="44" />
@@ -23,6 +38,7 @@
       <h1>Kanak Mechanicals &amp; Fabrication Works</h1>
       <span class="app-header__sub">Quotation Generator</span>
     </div>
+    <button type="button" class="header-logout" id="logoutBtn" title="Lock">Lock</button>
   </div>
 </header>
 
@@ -30,8 +46,7 @@
 
   <div id="errorBanner" class="error-banner hidden"></div>
   <div id="storageWarning" class="storage-warning hidden">
-    ⚠ This browser is blocking on-device saving right now — Save Customer, Quotation History, and draft
-    auto-save won't retain anything between taps. Downloading the PDF/Word file still works fine.
+    ⚠ Internet / cloud connection issue. Data may not sync across devices until online.
   </div>
 
   <!-- CUSTOMER DETAILS -->
@@ -159,13 +174,13 @@ Validity: - the offer is valid for period of 10 days from the date of the offer.
     <button class="btn btn--ghost" id="clearBtn" type="button">Clear Form</button>
   </div>
 
-  <p class="footer-note">Draft auto-saves to this phone's browser storage. Nothing leaves your device.</p>
+  <p class="footer-note">Online mode — serial, customers & history cloud pe sync hote hain.</p>
 
   <!-- HISTORY -->
   <section class="card">
-    <h2 class="card__title">Previous Quotations</h2>
+    <h2 class="card__title">Recent Quotations (Edit last 3)</h2>
     <div id="historyList" class="history-list">
-      <p class="hint">Generated quotations will appear here for editing.</p>
+      <p class="hint">Last 3 quotations — dono devices pe shared. Edit se form load hoga.</p>
     </div>
   </section>
 
@@ -191,13 +206,26 @@ Validity: - the offer is valid for period of 10 days from the date of the offer.
       </label>
       <label>Unit
         <select data-field="unit">
+          <option>Each</option>
           <option>Nos</option>
-          <option>Kg</option>
-          <option>Ltr</option>
-          <option>Mtr</option>
           <option>Set</option>
           <option>Job</option>
+          <option>Lot</option>
+          <option>Pair</option>
+          <option>Kg</option>
+          <option>Mtr</option>
+          <option>Ft</option>
+          <option>R.Ft</option>
+          <option>Sq.Ft</option>
+          <option>Sq.Mtr</option>
+          <option>Inch</option>
+          <option>Ltr</option>
+          <option>Box</option>
+          <option>Packet</option>
+          <option>Hour</option>
           <option>Day</option>
+          <option>LS</option>
+          <option>UOM</option>
         </select>
       </label>
       <label>Qty <span class="req">*</span>
@@ -228,8 +256,10 @@ Validity: - the offer is valid for period of 10 days from the date of the offer.
 <script src="signature-data.js"></script>
 <script src="pdf-export.js"></script>
 <script src="docx-export.js"></script>
+<script src="serial-config.js"></script>
+<script src="serial-sync.js"></script>
 <script src="app.js"></script>
 
-<script>if ("serviceWorker" in navigator) { window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {})); }</script>
+</div><!-- #appShell -->
 </body>
 </html>

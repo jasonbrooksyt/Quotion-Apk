@@ -15,7 +15,7 @@ const QGenApp = (function () {
     if (values) {
       node.querySelector('[data-field="desc"]').value = values.desc || '';
       node.querySelector('[data-field="hsn"]').value = values.hsn || '';
-      node.querySelector('[data-field="unit"]').value = values.unit || 'Nos';
+      node.querySelector('[data-field="unit"]').value = values.unit || 'Each';
       node.querySelector('[data-field="qty"]').value = values.qty ?? 1;
       node.querySelector('[data-field="rate"]').value = values.rate ?? 0;
       node.querySelector('[data-field="disc"]').value = values.disc ?? 0;
@@ -284,6 +284,15 @@ const QGenApp = (function () {
       document.getElementById('quoteNo').value = Utils.nextQuotationNumber(Storage.getLastQuoteNo());
       const termsEl = document.getElementById('termsText');
       if (termsEl) termsEl.value = DEFAULT_TERMS || '';
+      if (typeof SerialSync !== 'undefined') {
+        SerialSync.peekNext().then((no) => {
+          const el = document.getElementById('quoteNo');
+          if (el && (!el.value || el.value === Utils.nextQuotationNumber(Storage.getLastQuoteNo()) || el.value.startsWith('QT-'))) {
+            // only overwrite if user has not typed a custom number
+            if (!el.dataset.userEdited) el.value = no;
+          }
+        }).catch(() => {});
+      }
       return;
     }
 
@@ -304,14 +313,20 @@ const QGenApp = (function () {
     autosave();
   }
 
-  function refreshCustomerPicker() {
+  async function refreshCustomerPicker() {
     const picker = document.getElementById('savedCustomerPicker');
-    const customers = Storage.listCustomers();
+    let customers = [];
+    try {
+      customers = typeof SerialSync !== 'undefined'
+        ? await SerialSync.listCustomers()
+        : Storage.listCustomers();
+    } catch (e) {
+      customers = Storage.listCustomers();
+    }
     if (picker) {
       picker.innerHTML = '<option value="">— Select a saved customer —</option>' +
         customers.map((c) => `<option value="${Utils.escapeHtml(c.name)}">${Utils.escapeHtml(c.name)}</option>`).join('');
     }
-    // Visual list with Edit / Delete
     const list = document.getElementById('customerList');
     if (!list) return;
     if (!customers.length) {
@@ -335,16 +350,21 @@ const QGenApp = (function () {
     }).join('');
     list.querySelectorAll('.history-item').forEach((el) => {
       const name = el.dataset.custName;
-      el.querySelector('[data-action="edit"]').addEventListener('click', () => {
-        const found = Storage.listCustomers().find((c) => c.name === name);
+      el.querySelector('[data-action="edit"]').addEventListener('click', async () => {
+        let customers2 = [];
+        try {
+          customers2 = typeof SerialSync !== 'undefined' ? await SerialSync.listCustomers() : Storage.listCustomers();
+        } catch (e) { customers2 = Storage.listCustomers(); }
+        const found = customers2.find((c) => c.name === name);
         if (!found) { toast('Customer not found'); return; }
         loadCustomerIntoForm(found);
-        toast(`Loaded ${name} for editing`);
+        toast('Loaded ' + name + ' for editing');
         if (typeof window.scrollTo === 'function') window.scrollTo({ top: 0, behavior: 'smooth' });
       });
-      el.querySelector('[data-action="delete"]').addEventListener('click', () => {
-        if (!confirm(`Delete saved customer "${name}"?`)) return;
-        Storage.deleteCustomer(name);
+      el.querySelector('[data-action="delete"]').addEventListener('click', async () => {
+        if (!confirm('Delete saved customer "' + name + '"?')) return;
+        if (typeof SerialSync !== 'undefined') await SerialSync.deleteCustomer(name);
+        else Storage.deleteCustomer(name);
         refreshCustomerPicker();
         toast('Customer deleted');
       });
@@ -356,46 +376,64 @@ const QGenApp = (function () {
 
     const picker = document.getElementById('savedCustomerPicker');
     if (picker) {
-      picker.addEventListener('change', (e) => {
+      picker.addEventListener('change', async (e) => {
         const name = e.target.value;
         if (!name) return;
-        const found = Storage.listCustomers().find((c) => c.name === name);
+        let customers = [];
+        try {
+          customers = typeof SerialSync !== 'undefined' ? await SerialSync.listCustomers() : Storage.listCustomers();
+        } catch (err) { customers = Storage.listCustomers(); }
+        const found = customers.find((c) => c.name === name);
         if (!found) return;
         loadCustomerIntoForm(found);
       });
     }
 
-    document.getElementById('saveCustomerBtn').addEventListener('click', () => {
+    document.getElementById('saveCustomerBtn').addEventListener('click', async () => {
       const name = document.getElementById('custName').value.trim();
       if (!name) { toast('Enter a customer name first'); return; }
-      Storage.saveCustomer({
+      const cust = {
         name,
         address: document.getElementById('custAddress').value,
         gstin: document.getElementById('custGstin').value,
         contact: document.getElementById('custContact').value,
-      });
-      refreshCustomerPicker();
+      };
+      if (typeof SerialSync !== 'undefined') await SerialSync.saveCustomer(cust);
+      else Storage.saveCustomer(cust);
+      await refreshCustomerPicker();
       if (picker) picker.value = name;
       toast('Customer saved / updated');
     });
 
-    document.getElementById('deleteCustomerBtn').addEventListener('click', () => {
+    document.getElementById('deleteCustomerBtn').addEventListener('click', async () => {
       const name = picker ? picker.value : '';
       if (!name) { toast('Select a saved customer to delete'); return; }
-      if (!confirm(`Delete saved customer "${name}"?`)) return;
-      Storage.deleteCustomer(name);
-      refreshCustomerPicker();
+      if (!confirm('Delete saved customer "' + name + '"?')) return;
+      if (typeof SerialSync !== 'undefined') await SerialSync.deleteCustomer(name);
+      else Storage.deleteCustomer(name);
+      await refreshCustomerPicker();
       toast('Saved customer deleted');
     });
   }
 
   // ---------- Quotation history (edit a previously generated quotation) ----------
 
-  function refreshHistoryList() {
+  async function refreshHistoryList() {
     const wrap = document.getElementById('historyList');
-    const entries = Storage.listHistory();
+    if (!wrap) return;
+    wrap.innerHTML = '<p class="hint">Loading…</p>';
+    let entries = [];
+    try {
+      entries = typeof SerialSync !== 'undefined'
+        ? await SerialSync.listHistory()
+        : Storage.listHistory();
+    } catch (e) {
+      entries = Storage.listHistory();
+    }
+    const limit = (typeof HISTORY_EDIT_LIMIT === 'number') ? HISTORY_EDIT_LIMIT : 3;
+    entries = (entries || []).slice(0, limit);
     if (!entries.length) {
-      wrap.innerHTML = '<p class="hint">Generated quotations will appear here for editing.</p>';
+      wrap.innerHTML = '<p class="hint">Last 3 quotations yahan dikhenge — Edit se form load hoga.</p>';
       return;
     }
     wrap.innerHTML = entries.map((entry) => {
@@ -419,18 +457,26 @@ const QGenApp = (function () {
 
     wrap.querySelectorAll('.history-item').forEach((el) => {
       const quoteNo = el.dataset.quoteNo;
-      el.querySelector('[data-action="edit"]').addEventListener('click', () => {
-        const entry = Storage.getHistoryEntry(quoteNo);
+      el.querySelector('[data-action="edit"]').addEventListener('click', async () => {
+        let entry = null;
+        try {
+          entry = typeof SerialSync !== 'undefined'
+            ? await SerialSync.getHistoryEntry(quoteNo)
+            : Storage.getHistoryEntry(quoteNo);
+        } catch (e) {
+          entry = Storage.getHistoryEntry(quoteNo);
+        }
         if (!entry) { toast('Could not find that quotation'); return; }
         populateFormFromData(entry);
         recalcAll();
         autosave();
         if (typeof window.scrollTo === 'function') window.scrollTo({ top: 0, behavior: 'smooth' });
-        toast(`Loaded ${quoteNo} for editing`);
+        toast('Loaded ' + quoteNo + ' for editing');
       });
-      el.querySelector('[data-action="delete"]').addEventListener('click', () => {
-        if (!confirm(`Delete quotation ${quoteNo} from history? This does not delete any file already downloaded.`)) return;
-        Storage.deleteHistoryEntry(quoteNo);
+      el.querySelector('[data-action="delete"]').addEventListener('click', async () => {
+        if (!confirm('Delete quotation ' + quoteNo + ' from history?')) return;
+        if (typeof SerialSync !== 'undefined') await SerialSync.deleteHistoryEntry(quoteNo);
+        else Storage.deleteHistoryEntry(quoteNo);
         refreshHistoryList();
       });
     });
@@ -470,6 +516,8 @@ const QGenApp = (function () {
   // ---------- Wiring ----------
 
   function wireStaticControls() {
+    const qn = document.getElementById('quoteNo');
+    if (qn) qn.addEventListener('input', () => { qn.dataset.userEdited = '1'; });
     document.getElementById('addItemBtn').addEventListener('click', () => {
       addItem();
       recalcAll();
@@ -499,38 +547,133 @@ const QGenApp = (function () {
       recalcAll();
     });
 
-    document.getElementById('genPdfBtn').addEventListener('click', () => {
+    document.getElementById('genPdfBtn').addEventListener('click', async () => {
       const errors = validate();
       if (errors.length) { showErrors(errors); return; }
       hideErrors();
-      const data = collectData();
-      Storage.setLastQuoteNo(data.meta.quoteNo);
-      Storage.saveToHistory(data);
-      refreshHistoryList();
-      PdfExport.generate(data);
+      const btn = document.getElementById('genPdfBtn');
+      btn.disabled = true;
+      try {
+        if (typeof SerialSync !== 'undefined') {
+          const reserved = await SerialSync.reserveNext();
+          document.getElementById('quoteNo').value = reserved.quoteNo;
+          if (reserved.source === 'cloud') toast('Serial synced: ' + reserved.quoteNo);
+        }
+        const data = collectData();
+        Storage.setLastQuoteNo(data.meta.quoteNo);
+        if (typeof SerialSync !== 'undefined') await SerialSync.saveHistory(data);
+        else Storage.saveToHistory(data);
+        await refreshHistoryList();
+        PdfExport.generate(data);
+      } finally {
+        btn.disabled = false;
+      }
     });
 
-    document.getElementById('genDocxBtn').addEventListener('click', () => {
+    document.getElementById('genDocxBtn').addEventListener('click', async () => {
       const errors = validate();
       if (errors.length) { showErrors(errors); return; }
       hideErrors();
-      const data = collectData();
-      Storage.setLastQuoteNo(data.meta.quoteNo);
-      Storage.saveToHistory(data);
-      refreshHistoryList();
-      DocxExport.generate(data);
+      const btn = document.getElementById('genDocxBtn');
+      btn.disabled = true;
+      try {
+        if (typeof SerialSync !== 'undefined') {
+          const reserved = await SerialSync.reserveNext();
+          document.getElementById('quoteNo').value = reserved.quoteNo;
+          if (reserved.source === 'cloud') toast('Serial synced: ' + reserved.quoteNo);
+        }
+        const data = collectData();
+        Storage.setLastQuoteNo(data.meta.quoteNo);
+        if (typeof SerialSync !== 'undefined') await SerialSync.saveHistory(data);
+        else Storage.saveToHistory(data);
+        await refreshHistoryList();
+        DocxExport.generate(data);
+      } finally {
+        btn.disabled = false;
+      }
     });
   }
 
-  function init() {
+  function isUnlocked() {
+    return sessionStorage.getItem('kmf_unlocked') === '1';
+  }
+
+  function unlockApp() {
+    sessionStorage.setItem('kmf_unlocked', '1');
+    const login = document.getElementById('loginScreen');
+    const shell = document.getElementById('appShell');
+    if (login) login.classList.add('hidden');
+    if (shell) shell.classList.remove('hidden');
+  }
+
+  function lockApp() {
+    sessionStorage.removeItem('kmf_unlocked');
+    const login = document.getElementById('loginScreen');
+    const shell = document.getElementById('appShell');
+    if (shell) shell.classList.add('hidden');
+    if (login) login.classList.remove('hidden');
+    const pin = document.getElementById('pinInput');
+    if (pin) pin.value = '';
+  }
+
+  function wireLogin() {
+    const pinInput = document.getElementById('pinInput');
+    const pinBtn = document.getElementById('pinSubmitBtn');
+    const pinErr = document.getElementById('pinError');
+    const expected = (typeof APP_PIN === 'string') ? APP_PIN : '112266';
+
+    function tryUnlock() {
+      const val = (pinInput && pinInput.value) ? pinInput.value.trim() : '';
+      if (val === expected) {
+        if (pinErr) pinErr.classList.add('hidden');
+        unlockApp();
+        initApp();
+      } else {
+        if (pinErr) pinErr.classList.remove('hidden');
+        if (pinInput) { pinInput.value = ''; pinInput.focus(); }
+      }
+    }
+
+    if (pinBtn) pinBtn.addEventListener('click', tryUnlock);
+    if (pinInput) {
+      pinInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') tryUnlock();
+      });
+    }
+    const logout = document.getElementById('logoutBtn');
+    if (logout) logout.addEventListener('click', () => {
+      if (confirm('Lock the app?')) lockApp();
+    });
+  }
+
+  function initApp() {
     if (!Storage.isAvailable()) {
-      document.getElementById('storageWarning').classList.remove('hidden');
+      const w = document.getElementById('storageWarning');
+      if (w) w.classList.remove('hidden');
+    }
+    if (typeof SerialSync !== 'undefined' && !SerialSync.isConfigured()) {
+      const w = document.getElementById('storageWarning');
+      if (w) {
+        w.textContent = '⚠ Firebase URL serial-config.js mein set nahi hai — shared serial/history off hai.';
+        w.classList.remove('hidden');
+      }
     }
     wireStaticControls();
     wireCustomerPicker();
     loadDraftIntoForm();
     refreshHistoryList();
     recalcAll();
+  }
+
+  function init() {
+    wireLogin();
+    if (isUnlocked()) {
+      unlockApp();
+      initApp();
+    } else {
+      const pin = document.getElementById('pinInput');
+      if (pin) setTimeout(() => pin.focus(), 100);
+    }
   }
 
   document.addEventListener('DOMContentLoaded', init);
