@@ -11,10 +11,10 @@ const COMPANY = {
 };
 
 const DEFAULT_TERMS = [
-  'Taxes 18% GST Extra.',
+  'GST rate may be changed in final tax invoice as per type of Goods or service.',
   'Work Completion: - 30 days from date of receipts of your purchase order.',
   'Payment condition: - 100% within 30 days after delivery.',
-  'Validity: - the offer is valid for period of 15 days from the date of the offer.',
+  'Validity: - the offer is valid for period of 10 days from the date of the offer.',
 ].join('\n');
 
 const Utils = (function () {

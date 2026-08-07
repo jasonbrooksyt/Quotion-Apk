@@ -193,7 +193,7 @@ const DocxExport = (function () {
 
     // ---------- Assemble document ----------
 
-    const children = [headerTable, itemsTable, p('', { size: 12 }), totalsTable, p('', { size: 6 }), wordsTable, p('', { size: 4 })];
+    const children = [headerTable, itemsTable, p('', { size: 28 }), totalsTable, p('', { size: 8 }), wordsTable, p('', { size: 4 })];
 
     if (data.terms.remarks) {
       children.push(p('Remarks:', { bold: true, size: 18 }));

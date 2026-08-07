@@ -52,9 +52,11 @@
       </label>
     </div>
     <div class="grid2">
-      <button class="btn btn--secondary" id="saveCustomerBtn" type="button">Save Customer</button>
-      <button class="btn btn--ghost" id="deleteCustomerBtn" type="button">Delete Saved</button>
+      <button class="btn btn--secondary" id="saveCustomerBtn" type="button">Save / Update Customer</button>
+      <button class="btn btn--ghost" id="deleteCustomerBtn" type="button">Delete Selected</button>
     </div>
+    <p class="hint">Select a saved customer to load &amp; edit, then press Save / Update. Or Delete Selected to remove.</p>
+    <div id="customerList" class="history-list" style="margin-top:10px"></div>
   </section>
 
   <!-- QUOTATION META -->
@@ -119,6 +121,18 @@
     <p class="hint">Note: Freight/Insurance/Loading/Unloading are added after tax as flat amounts in this version — they are not separately taxed. If any of these need their own GST, add them as a line item instead.</p>
   </section>
 
+
+
+  <!-- TERMS -->
+  <section class="card">
+    <h2 class="card__title">Terms & Conditions</h2>
+    <label>Terms & Conditions (one per line)
+      <textarea id="termsText" rows="5">GST rate may be changed in final tax invoice as per type of Goods or service.
+Work Completion: - 30 days from date of receipts of your purchase order.
+Payment condition: - 100% within 30 days after delivery.
+Validity: - the offer is valid for period of 10 days from the date of the offer.</textarea>
+    </label>
+  </section>
 
   <!-- SUMMARY -->
   <section class="card summary-card">

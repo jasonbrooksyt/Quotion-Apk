@@ -244,8 +244,8 @@ const PdfExport = (function () {
   // ---- Totals box + Amount in Words (styled like the invoice's bottom section) ----
 
   function drawTotalsAndWords(doc, data, y) {
-    // Extra gap between items table and amount section for cleaner look
-    y += 10;
+    // Extra gap between items table and amount section so layout fills the page better
+    y += 22;
     y = ensureSpace(doc, y, 50);
     const t = data.totals;
 

@@ -199,7 +199,8 @@ const QGenApp = (function () {
         deliveryTime: '',
         paymentTerms: '',
         remarks: '',
-        termsText: (typeof DEFAULT_TERMS === 'string' ? DEFAULT_TERMS : '').split('\n').map((s) => s.trim()).filter(Boolean),
+        termsText: (document.getElementById('termsText')?.value || DEFAULT_TERMS || '')
+          .split('\n').map((s) => s.trim()).filter(Boolean),
       },
       charges,
       overallDiscount,
@@ -244,6 +245,13 @@ const QGenApp = (function () {
     document.getElementById('gstType').value = data.meta?.gstType || 'CGST_SGST';
     document.getElementById('currency').value = data.meta?.currency || 'INR';
 
+    const termsEl = document.getElementById('termsText');
+    if (termsEl) {
+      termsEl.value = (data.terms?.termsText && data.terms.termsText.length)
+        ? data.terms.termsText.join('\n')
+        : (DEFAULT_TERMS || '');
+    }
+
     document.getElementById('chargeFreight').value = data.charges?.freight ?? 0;
     document.getElementById('chargeInsurance').value = data.charges?.insurance ?? 0;
     document.getElementById('chargeLoading').value = data.charges?.loading ?? 0;
@@ -267,6 +275,8 @@ const QGenApp = (function () {
       addItem();
       document.getElementById('quoteDate').value = Utils.todayISO();
       document.getElementById('quoteNo').value = Utils.nextQuotationNumber(Storage.getLastQuoteNo());
+      const termsEl = document.getElementById('termsText');
+      if (termsEl) termsEl.value = DEFAULT_TERMS || '';
       return;
     }
 
@@ -275,29 +285,78 @@ const QGenApp = (function () {
 
   // ---------- Saved customers ----------
 
+  function loadCustomerIntoForm(found) {
+    if (!found) return;
+    document.getElementById('custName').value = found.name || '';
+    document.getElementById('custAddress').value = found.address || '';
+    document.getElementById('custGstin').value = found.gstin || '';
+    document.getElementById('custContact').value = found.contact || '';
+    const picker = document.getElementById('savedCustomerPicker');
+    if (picker) picker.value = found.name || '';
+    recalcAll();
+    autosave();
+  }
+
   function refreshCustomerPicker() {
     const picker = document.getElementById('savedCustomerPicker');
     const customers = Storage.listCustomers();
-    picker.innerHTML = '<option value="">— Select a saved customer —</option>' +
-      customers.map((c) => `<option value="${Utils.escapeHtml(c.name)}">${Utils.escapeHtml(c.name)}</option>`).join('');
+    if (picker) {
+      picker.innerHTML = '<option value="">— Select a saved customer —</option>' +
+        customers.map((c) => `<option value="${Utils.escapeHtml(c.name)}">${Utils.escapeHtml(c.name)}</option>`).join('');
+    }
+    // Visual list with Edit / Delete
+    const list = document.getElementById('customerList');
+    if (!list) return;
+    if (!customers.length) {
+      list.innerHTML = '<p class="hint">No saved customers yet.</p>';
+      return;
+    }
+    list.innerHTML = customers.map((c) => {
+      const name = Utils.escapeHtml(c.name || '');
+      return `
+        <div class="history-item" data-cust-name="${name}">
+          <div class="history-item__info">
+            <strong>${name}</strong>
+            <span>${Utils.escapeHtml(c.gstin || '')}</span>
+            <span>${Utils.escapeHtml((c.address || '').slice(0, 60))}</span>
+          </div>
+          <div class="history-item__actions">
+            <button type="button" class="btn btn--secondary" data-action="edit">Edit</button>
+            <button type="button" class="btn btn--ghost" data-action="delete">Delete</button>
+          </div>
+        </div>`;
+    }).join('');
+    list.querySelectorAll('.history-item').forEach((el) => {
+      const name = el.dataset.custName;
+      el.querySelector('[data-action="edit"]').addEventListener('click', () => {
+        const found = Storage.listCustomers().find((c) => c.name === name);
+        if (!found) { toast('Customer not found'); return; }
+        loadCustomerIntoForm(found);
+        toast(`Loaded ${name} for editing`);
+        if (typeof window.scrollTo === 'function') window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+      el.querySelector('[data-action="delete"]').addEventListener('click', () => {
+        if (!confirm(`Delete saved customer "${name}"?`)) return;
+        Storage.deleteCustomer(name);
+        refreshCustomerPicker();
+        toast('Customer deleted');
+      });
+    });
   }
 
   function wireCustomerPicker() {
     refreshCustomerPicker();
 
-    document.getElementById('savedCustomerPicker').addEventListener('change', (e) => {
-      const name = e.target.value;
-      if (!name) return;
-      const customers = Storage.listCustomers();
-      const found = customers.find((c) => c.name === name);
-      if (!found) return;
-      document.getElementById('custName').value = found.name || '';
-      document.getElementById('custAddress').value = found.address || '';
-      document.getElementById('custGstin').value = found.gstin || '';
-      document.getElementById('custContact').value = found.contact || '';
-      recalcAll();
-      autosave();
-    });
+    const picker = document.getElementById('savedCustomerPicker');
+    if (picker) {
+      picker.addEventListener('change', (e) => {
+        const name = e.target.value;
+        if (!name) return;
+        const found = Storage.listCustomers().find((c) => c.name === name);
+        if (!found) return;
+        loadCustomerIntoForm(found);
+      });
+    }
 
     document.getElementById('saveCustomerBtn').addEventListener('click', () => {
       const name = document.getElementById('custName').value.trim();
@@ -309,13 +368,12 @@ const QGenApp = (function () {
         contact: document.getElementById('custContact').value,
       });
       refreshCustomerPicker();
-      document.getElementById('savedCustomerPicker').value = name;
-      toast('Customer saved');
+      if (picker) picker.value = name;
+      toast('Customer saved / updated');
     });
 
     document.getElementById('deleteCustomerBtn').addEventListener('click', () => {
-      const picker = document.getElementById('savedCustomerPicker');
-      const name = picker.value;
+      const name = picker ? picker.value : '';
       if (!name) { toast('Select a saved customer to delete'); return; }
       if (!confirm(`Delete saved customer "${name}"?`)) return;
       Storage.deleteCustomer(name);
@@ -428,6 +486,8 @@ const QGenApp = (function () {
         .forEach((el) => { if (el.type !== 'date') el.value = ''; });
       document.getElementById('quoteDate').value = Utils.todayISO();
       document.getElementById('quoteNo').value = Utils.nextQuotationNumber(Storage.getLastQuoteNo());
+      const termsEl = document.getElementById('termsText');
+      if (termsEl) termsEl.value = DEFAULT_TERMS || '';
       addItem();
       recalcAll();
     });
