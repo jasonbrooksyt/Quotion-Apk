@@ -16,6 +16,7 @@ const PdfExport = (function () {
 
     let y = MARGIN;
     y = drawHeaderBox(doc, data, y);
+    const bodyTop = y; // continuous body frame starts here (items → signature)
     y = drawItemsTable(doc, data, y);
 
     // Push totals/terms/signature down so the quotation fills the A4 page
@@ -25,6 +26,11 @@ const PdfExport = (function () {
 
     y = drawTotalsAndWords(doc, data, y);
     y = drawTermsAndSignature(doc, data, y);
+
+    // Continuous outer border around items + empty space + totals + terms + signature
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.4);
+    doc.rect(MARGIN, bodyTop, CONTENT_W, y - bodyTop);
 
     const filename = `Quotation_${(data.meta.quoteNo || 'draft').replace(/[^\w-]/g, '_')}.pdf`;
     const blob = doc.output('blob');
@@ -126,13 +132,17 @@ const PdfExport = (function () {
     }
     if (data.customer.gstin) billLines.push({ text: `GSTIN :- ${data.customer.gstin}`, bold: false });
     if (data.customer.contact) billLines.push({ text: `Kind Attn.: ${data.customer.contact}`, bold: false });
+
+    // Subject with a small visual gap after address block
+    const subjectLines = [];
     if (data.meta.subject) {
       doc.setFontSize(9);
       const wrapped = doc.splitTextToSize(`Subject: ${data.meta.subject}`, CONTENT_W - 4);
-      wrapped.forEach((l, i) => billLines.push({ text: l, bold: i === 0 }));
+      wrapped.forEach((l, i) => subjectLines.push({ text: l, bold: i === 0 }));
     }
 
-    const rBillH = Math.max(9, billLines.length * 4.3 + 3);
+    const gapBeforeSubject = subjectLines.length ? 3.5 : 0;
+    const rBillH = Math.max(9, billLines.length * 4.3 + gapBeforeSubject + subjectLines.length * 4.3 + 3);
     let ly = y + 4;
     billLines.forEach((l) => {
       doc.setFont(undefined, l.bold ? 'bold' : 'normal');
@@ -140,6 +150,15 @@ const PdfExport = (function () {
       doc.text(l.text, MARGIN + 2, ly);
       ly += 4.3;
     });
+    if (subjectLines.length) {
+      ly += gapBeforeSubject;
+      subjectLines.forEach((l) => {
+        doc.setFont(undefined, l.bold ? 'bold' : 'normal');
+        doc.setFontSize(9);
+        doc.text(l.text, MARGIN + 2, ly);
+        ly += 4.3;
+      });
+    }
     doc.setFont(undefined, 'normal');
     y += rBillH;
     hLine(doc, y);
