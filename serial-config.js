@@ -40,10 +40,10 @@
  * 4. Neeche URL + KEY paste karo
  */
 
-const SUPABASE_URL = '';
+const SUPABASE_URL = 'https://ywwvpycpqieqgsszeqie.supabase.co/rest/v1/';
 // Example: 'https://abcdefgh.supabase.co'
 
-const SUPABASE_ANON_KEY = '';
+const SUPABASE_ANON_KEY = 'sb_publishable_1MVlZFVDGPK8Izk7b3VJ8g_HnYYBRz9';
 // Example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
 
 /** App login PIN */
