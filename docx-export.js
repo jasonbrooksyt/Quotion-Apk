@@ -96,10 +96,6 @@ const DocxExport = (function () {
 
     headerRows.push(new TableRow({ children: [cell(billParas, { width: TOTAL_W })] }));
 
-    headerRows.push(new TableRow({
-      children: [cell([p(`Valid Until :- ${Utils.formatDateDMY(data.meta.validUntil)}`, { bold: true, size: 18 })], { width: TOTAL_W })],
-    }));
-
     const headerTable = new Table({ width: { size: TOTAL_W, type: WidthType.DXA }, rows: headerRows });
 
     // ---------- Item table ----------
@@ -137,7 +133,7 @@ const DocxExport = (function () {
 
     const itemsTable = new Table({ width: { size: TOTAL_W, type: WidthType.DXA }, rows: [headerRow, ...itemRows] });
 
-    // ---------- Totals block + Amount in Words (two-column: words left, figures right) ----------
+    // ---------- Totals block (right-aligned figures) then Amount in Words below ----------
 
     const t = data.totals;
     const totalsLines = [[`Taxable Amount`, Utils.fmtMoney(t.taxable)]];
@@ -155,40 +151,49 @@ const DocxExport = (function () {
     const currencyLabel = data.meta.currency === 'USD' ? 'US Dollars' : 'Rupees';
     const wordsText = Utils.amountInWords(t.finalAmount, currencyLabel);
 
-    // Merge the words cell down across all totals rows using rowSpan on the first row
-    const totalsTableRows = totalsLines.map(([label, val], i) => new TableRow({
-      children: i === 0
-        ? [
-          new TableCell({
-            width: { size: TOTAL_W * 0.5, type: WidthType.DXA },
-            rowSpan: totalsLines.length + 1,
-            verticalAlign: VerticalAlign.CENTER,
-            shading: { type: ShadingType.CLEAR, color: 'auto', fill: 'E0EAF6' },
-            margins: { top: 60, bottom: 60, left: 90, right: 90 },
-            borders,
-            children: [p('Amount in Words :-', { bold: true, size: 16 }), p(wordsText, { size: 16 })],
-          }),
-          cell([p(label, { size: 16 })], { width: TOTAL_W * 0.28 }),
-          cell([p(String(val), { size: 16, align: AlignmentType.RIGHT })], { width: TOTAL_W * 0.22 }),
-        ]
-        : [
-          cell([p(label, { size: 16 })], { width: TOTAL_W * 0.28 }),
-          cell([p(String(val), { size: 16, align: AlignmentType.RIGHT })], { width: TOTAL_W * 0.22 }),
-        ],
+    // Spacer column on left so totals sit on the right; figures table only
+    const spacerW = Math.floor(TOTAL_W * 0.5);
+    const labelW = Math.floor(TOTAL_W * 0.28);
+    const valW = TOTAL_W - spacerW - labelW;
+
+    const totalsTableRows = totalsLines.map(([label, val]) => new TableRow({
+      children: [
+        cell([p('')], { width: spacerW, bdr: noBorder }),
+        cell([p(label, { size: 16 })], { width: labelW }),
+        cell([p(String(val), { size: 16, align: AlignmentType.RIGHT })], { width: valW }),
+      ],
     }));
 
     totalsTableRows.push(new TableRow({
       children: [
-        cell([p('Grand Total', { bold: true, size: 20 })], { width: TOTAL_W * 0.28, shade: 'E6ECF5' }),
-        cell([p(`${currencySymbol} ${Utils.fmtMoney(t.finalAmount)}`, { bold: true, size: 20, align: AlignmentType.RIGHT })], { width: TOTAL_W * 0.22, shade: 'E6ECF5' }),
+        cell([p('')], { width: spacerW, bdr: noBorder }),
+        cell([p('Grand Total', { bold: true, size: 20 })], { width: labelW, shade: 'E6ECF5' }),
+        cell([p(`${currencySymbol} ${Utils.fmtMoney(t.finalAmount)}`, { bold: true, size: 20, align: AlignmentType.RIGHT })], { width: valW, shade: 'E6ECF5' }),
       ],
     }));
 
     const totalsTable = new Table({ width: { size: TOTAL_W, type: WidthType.DXA }, rows: totalsTableRows });
 
+    // Amount in Words — full width below totals
+    const wordsTable = new Table({
+      width: { size: TOTAL_W, type: WidthType.DXA },
+      rows: [new TableRow({
+        children: [new TableCell({
+          width: { size: TOTAL_W, type: WidthType.DXA },
+          borders,
+          shading: { type: ShadingType.CLEAR, color: 'auto', fill: 'E0EAF6' },
+          margins: { top: 80, bottom: 80, left: 90, right: 90 },
+          children: [
+            p('Amount in Words :-', { bold: true, size: 16 }),
+            p(wordsText, { size: 16 }),
+          ],
+        })],
+      })],
+    });
+
     // ---------- Assemble document ----------
 
-    const children = [headerTable, itemsTable, totalsTable, p('', { size: 4 })];
+    const children = [headerTable, itemsTable, p('', { size: 12 }), totalsTable, p('', { size: 6 }), wordsTable, p('', { size: 4 })];
 
     if (data.terms.remarks) {
       children.push(p('Remarks:', { bold: true, size: 18 }));

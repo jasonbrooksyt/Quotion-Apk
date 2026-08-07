@@ -68,9 +68,6 @@
         <input type="date" id="quoteDate" />
       </label>
     </div>
-    <label>Validity (days)
-      <input type="number" id="validityDays" value="30" min="1" />
-    </label>
     <div class="grid2">
       <label>GST Type
         <select id="gstType">
@@ -122,27 +119,6 @@
     <p class="hint">Note: Freight/Insurance/Loading/Unloading are added after tax as flat amounts in this version — they are not separately taxed. If any of these need their own GST, add them as a line item instead.</p>
   </section>
 
-  <!-- TERMS -->
-  <section class="card">
-    <h2 class="card__title">Terms & Notes</h2>
-    <div class="grid2">
-      <label>Delivery Time
-        <input type="text" id="deliveryTime" placeholder="e.g. 30 days from PO" />
-      </label>
-      <label>Payment Terms
-        <input type="text" id="paymentTerms" placeholder="e.g. 100% within 30 days" />
-      </label>
-    </div>
-    <label>Remarks
-      <textarea id="remarks" rows="2" placeholder="Any additional remarks"></textarea>
-    </label>
-    <label>Terms & Conditions (one per line)
-      <textarea id="termsText" rows="6">Taxes 18% GST Extra.
-Work Completion: - 30 days from date of receipts of your purchase order.
-Payment condition: - 100% within 30 days after delivery.
-Validity: - the offer is valid for period of 15 days from the date of the offer.</textarea>
-    </label>
-  </section>
 
   <!-- SUMMARY -->
   <section class="card summary-card">

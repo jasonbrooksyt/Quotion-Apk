@@ -244,7 +244,9 @@ const PdfExport = (function () {
   // ---- Totals box + Amount in Words (styled like the invoice's bottom section) ----
 
   function drawTotalsAndWords(doc, data, y) {
-    y = ensureSpace(doc, y, 45);
+    // Extra gap between items table and amount section for cleaner look
+    y += 10;
+    y = ensureSpace(doc, y, 50);
     const t = data.totals;
 
     const boxW = 75, boxX = PAGE_W - MARGIN - boxW;
@@ -283,23 +285,24 @@ const PdfExport = (function () {
     doc.setFont(undefined, 'normal');
     ry += rowH + 1;
 
-    const boxBottom = ry;
-
-    // Amount in Words — full-width bar BELOW the totals box (not beside it)
+    // Amount in Words — full width bar BELOW the totals box (lower side)
     const currencyLabel = data.meta.currency === 'USD' ? 'US Dollars' : 'Rupees';
     const wordsText = Utils.amountInWords(t.finalAmount, currencyLabel);
-    doc.setFontSize(8);
-    const wLines = doc.splitTextToSize(wordsText, CONTENT_W - 4);
-    const wordsRowH = wLines.length * 4 + 5;
+    doc.setFontSize(8.5);
+    const wLines = doc.splitTextToSize(wordsText, CONTENT_W - 6);
+    const wordsRowH = Math.max(10, wLines.length * 4.2 + 6);
 
+    const wordsTop = ry + 2;
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.3);
     doc.setFillColor(224, 234, 246);
-    doc.rect(MARGIN, boxBottom, CONTENT_W, wordsRowH, 'FD');
+    doc.rect(MARGIN, wordsTop, CONTENT_W, wordsRowH, 'FD');
     doc.setFont(undefined, 'bold');
-    doc.text('Amount in Words :-', MARGIN + 2, boxBottom + 4.5);
+    doc.text('Amount in Words :-', MARGIN + 2, wordsTop + 4.5);
     doc.setFont(undefined, 'normal');
-    doc.text(wLines, MARGIN + 2, boxBottom + 4.5 + wLines.length * 4);
+    doc.text(wLines, MARGIN + 2, wordsTop + 9);
 
-    return boxBottom + wordsRowH + 4;
+    return wordsTop + wordsRowH + 4;
   }
 
   function drawTermsAndSignature(doc, data, y) {
@@ -307,6 +310,23 @@ const PdfExport = (function () {
     doc.setFontSize(9);
     doc.setTextColor(20, 20, 20);
     doc.setFont(undefined, 'bold');
+
+    if (data.terms.remarks) {
+      doc.text('Remarks:', MARGIN, y);
+      doc.setFont(undefined, 'normal');
+      const lines = doc.splitTextToSize(data.terms.remarks, CONTENT_W);
+      doc.text(lines, MARGIN, y + 4);
+      y += 4 + lines.length * 4;
+      doc.setFont(undefined, 'bold');
+    }
+
+    if (data.terms.deliveryTime || data.terms.paymentTerms) {
+      y += 2;
+      doc.setFontSize(8.5);
+      if (data.terms.deliveryTime) { doc.text(`Delivery Time: ${data.terms.deliveryTime}`, MARGIN, y); y += 4.2; }
+      doc.setFont(undefined, 'normal');
+      if (data.terms.paymentTerms) { doc.text(`Payment Terms: ${data.terms.paymentTerms}`, MARGIN, y); y += 4.2; }
+    }
 
     if (data.terms.termsText && data.terms.termsText.length) {
       y += 3;

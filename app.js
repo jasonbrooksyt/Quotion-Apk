@@ -191,16 +191,15 @@ const QGenApp = (function () {
       meta: {
         quoteNo: document.getElementById('quoteNo').value,
         date: document.getElementById('quoteDate').value,
-        validUntil: Utils.addDaysISO(document.getElementById('quoteDate').value, document.getElementById('validityDays').value),
         subject: document.getElementById('subject').value,
         gstType,
         currency,
       },
       terms: {
-        deliveryTime: document.getElementById('deliveryTime').value,
-        paymentTerms: document.getElementById('paymentTerms').value,
-        remarks: document.getElementById('remarks').value,
-        termsText: document.getElementById('termsText').value.split('\n').map((s) => s.trim()).filter(Boolean),
+        deliveryTime: '',
+        paymentTerms: '',
+        remarks: '',
+        termsText: (typeof DEFAULT_TERMS === 'string' ? DEFAULT_TERMS : '').split('\n').map((s) => s.trim()).filter(Boolean),
       },
       charges,
       overallDiscount,
@@ -244,11 +243,6 @@ const QGenApp = (function () {
     document.getElementById('subject').value = data.meta?.subject || '';
     document.getElementById('gstType').value = data.meta?.gstType || 'CGST_SGST';
     document.getElementById('currency').value = data.meta?.currency || 'INR';
-
-    document.getElementById('deliveryTime').value = data.terms?.deliveryTime || '';
-    document.getElementById('paymentTerms').value = data.terms?.paymentTerms || '';
-    document.getElementById('remarks').value = data.terms?.remarks || '';
-    document.getElementById('termsText').value = (data.terms?.termsText || []).join('\n');
 
     document.getElementById('chargeFreight').value = data.charges?.freight ?? 0;
     document.getElementById('chargeInsurance').value = data.charges?.insurance ?? 0;
@@ -434,8 +428,6 @@ const QGenApp = (function () {
         .forEach((el) => { if (el.type !== 'date') el.value = ''; });
       document.getElementById('quoteDate').value = Utils.todayISO();
       document.getElementById('quoteNo').value = Utils.nextQuotationNumber(Storage.getLastQuoteNo());
-      document.getElementById('validityDays').value = 30;
-      document.getElementById('termsText').value = DEFAULT_TERMS;
       addItem();
       recalcAll();
     });
