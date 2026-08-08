@@ -1,4 +1,4 @@
-/* serial-sync.js — Online store via Supabase REST (no SDK) */
+/* serial-sync.js — Shared serial + customers + history via Supabase REST */
 
 const SerialSync = (function () {
 
@@ -55,6 +55,19 @@ const SerialSync = (function () {
     return Number(m[2]) || 0;
   }
 
+  function parseInvSeq(no) {
+    if (!no) return 0;
+    var fy = Utils.financialYearLabel(new Date());
+    var m = String(no).match(/GST\/(\d{2}-\d{2})\/(\d+)/i);
+    if (!m || m[1] !== fy) return 0;
+    return Number(m[2]) || 0;
+  }
+
+  function formatInvNo(seq) {
+    var fy = Utils.financialYearLabel(new Date());
+    return 'GST/' + fy + '/' + String(seq).padStart(4, '0');
+  }
+
   async function peekNext() {
     if (!isConfigured()) {
       return Utils.nextQuotationNumber(Storage.getLastQuoteNo());
@@ -103,6 +116,54 @@ const SerialSync = (function () {
     }
   }
 
+  async function peekInvoiceNext() {
+    if (!isConfigured()) {
+      return Utils.nextInvoiceNumber(localStorage.getItem('qgen.lastInvoiceNo.v1'));
+    }
+    try {
+      var rows = await sbFetch('kmf_counter?id=eq.1&select=last_inv_seq,last_inv_no');
+      var row = rows && rows[0];
+      var last = row && typeof row.last_inv_seq === 'number' ? row.last_inv_seq : 0;
+      var localLast = parseInvSeq(localStorage.getItem('qgen.lastInvoiceNo.v1'));
+      return formatInvNo(Math.max(last, localLast) + 1);
+    } catch (e) {
+      console.warn('peekInvoiceNext', e);
+      return Utils.nextInvoiceNumber(localStorage.getItem('qgen.lastInvoiceNo.v1'));
+    }
+  }
+
+  async function reserveInvoiceNext() {
+    function localFallback() {
+      var no = Utils.nextInvoiceNumber(localStorage.getItem('qgen.lastInvoiceNo.v1'));
+      localStorage.setItem('qgen.lastInvoiceNo.v1', no);
+      return { quoteNo: no, source: 'local' };
+    }
+    if (!isConfigured()) return localFallback();
+    try {
+      var rows = await sbFetch('kmf_counter?id=eq.1&select=last_inv_seq,last_inv_no');
+      var row = rows && rows[0];
+      var lastSeq = row && typeof row.last_inv_seq === 'number' ? row.last_inv_seq : 0;
+      var localLast = parseInvSeq(localStorage.getItem('qgen.lastInvoiceNo.v1'));
+      if (localLast > lastSeq) lastSeq = localLast;
+      var nextSeq = lastSeq + 1;
+      var invNo = formatInvNo(nextSeq);
+      await sbFetch('kmf_counter?id=eq.1', {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: {
+          last_inv_seq: nextSeq,
+          last_inv_no: invNo,
+          updated_at: new Date().toISOString(),
+        },
+      });
+      localStorage.setItem('qgen.lastInvoiceNo.v1', invNo);
+      return { quoteNo: invNo, source: 'cloud' };
+    } catch (e) {
+      console.warn('reserveInvoiceNext', e);
+      return localFallback();
+    }
+  }
+
   async function saveHistory(quoteData) {
     if (!quoteData || !quoteData.meta || !quoteData.meta.quoteNo) return false;
     var quoteNo = quoteData.meta.quoteNo;
@@ -119,7 +180,7 @@ const SerialSync = (function () {
           saved_at: payload.savedAt,
         },
       });
-      await trimHistory(20);
+      await trimHistory(30);
       return true;
     } catch (e) {
       console.warn('saveHistory', e);
@@ -130,7 +191,7 @@ const SerialSync = (function () {
   async function listHistory() {
     if (isConfigured()) {
       try {
-        var rows = await sbFetch('kmf_history?select=quote_no,payload,saved_at&order=saved_at.desc&limit=20');
+        var rows = await sbFetch('kmf_history?select=quote_no,payload,saved_at&order=saved_at.desc&limit=30');
         if (Array.isArray(rows)) {
           return rows.map(function (r) {
             var p = r.payload || {};
@@ -194,7 +255,7 @@ const SerialSync = (function () {
   async function listCustomers() {
     if (isConfigured()) {
       try {
-        var rows = await sbFetch('kmf_customers?select=payload');
+        var rows = await sbFetch('kmf_customers?select=payload&order=name_key.asc');
         if (Array.isArray(rows)) {
           return rows.map(function (r) { return r.payload; }).filter(Boolean)
             .sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
@@ -212,7 +273,7 @@ const SerialSync = (function () {
     var key = name.toLowerCase().replace(/[^\w-]/g, '_');
     var payload = Object.assign({}, customer, { name: name });
     Storage.saveCustomer(payload);
-    if (!isConfigured()) return true;
+    if (!isConfigured()) return false;
     try {
       await sbFetch('kmf_customers', {
         method: 'POST',
@@ -247,6 +308,8 @@ const SerialSync = (function () {
     isConfigured: isConfigured,
     peekNext: peekNext,
     reserveNext: reserveNext,
+    peekInvoiceNext: peekInvoiceNext,
+    reserveInvoiceNext: reserveInvoiceNext,
     saveHistory: saveHistory,
     listHistory: listHistory,
     getHistoryEntry: getHistoryEntry,
