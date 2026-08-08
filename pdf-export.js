@@ -18,15 +18,17 @@ const PdfExport = (function () {
     let y = MARGIN;
     y = drawHeaderBox(doc, data, y);
     const bodyTop = y;
-    y = drawItemsTable(doc, data, y);
-
-    const bottomH = estimateBottomHeight(data) + (isInvoice ? 28 : 0);
-    const minY = PAGE_H - MARGIN - bottomH;
-    if (y < minY) y = minY;
+    // Invoice: reserve space for bank+QR+totals+words+sign so item rows can stretch full page
+    const invoiceBottomReserve = 88;
+    y = drawItemsTable(doc, data, y, isInvoice ? invoiceBottomReserve : 55);
 
     if (isInvoice) {
+      // Item rows already fill down; only a thin gap before bottom block
       y = await drawInvoiceBottom(doc, data, y);
     } else {
+      const bottomH = estimateBottomHeight(data);
+      const minY = PAGE_H - MARGIN - bottomH;
+      if (y < minY) y = minY;
       y = drawTotalsAndWords(doc, data, y);
       y = drawTermsAndSignature(doc, data, y);
     }
@@ -108,7 +110,7 @@ const PdfExport = (function () {
       }
     }
     doc.setFont(undefined, 'bold');
-    doc.setFontSize(14);
+    doc.setFontSize((data.meta && data.meta.docType === 'invoice') ? 15 : 14);
     doc.setTextColor(26, 61, 156);
     doc.text(data.company.name || 'Company Name', PAGE_W / 2, y + 9, { align: 'center' });
     doc.setFont(undefined, 'normal');
@@ -269,19 +271,24 @@ const PdfExport = (function () {
     return y + headH;
   }
 
-  function drawItemsTable(doc, data, y) {
+  function drawItemsTable(doc, data, y, bottomReserve) {
     const isInvoice = (data.meta && data.meta.docType === 'invoice') || /^GST\//i.test(String((data.meta && data.meta.quoteNo) || ''));
     const cols = getCols(isInvoice);
     doc.setFontSize(8);
     y = drawTableHeader(doc, y, cols);
 
-    data.totals.computed.forEach((it, idx) => {
-      const descLines = doc.splitTextToSize(it.desc || '', cols[1].w - 3);
-      // Invoice: taller rows like reference (min space for description block)
-      const minH = isInvoice ? 22 : 7;
-      const rowH = Math.max(minH, descLines.length * 3.6 + 4);
+    const items = data.totals.computed || [];
+    const n = Math.max(items.length, 1);
+    const reserve = bottomReserve != null ? bottomReserve : 55;
+    const spaceForItems = Math.max(30, PAGE_H - MARGIN - reserve - y);
+    // Stretch rows so invoice fills the page like the reference
+    const stretchMin = isInvoice ? Math.max(36, spaceForItems / n) : 7;
 
-      if (y + rowH > PAGE_H - MARGIN - 55) {
+    items.forEach((it, idx) => {
+      const descLines = doc.splitTextToSize(it.desc || '', cols[1].w - 3);
+      const rowH = Math.max(stretchMin, descLines.length * 3.6 + 4);
+
+      if (y + rowH > PAGE_H - MARGIN - 20 && !isInvoice) {
         doc.addPage();
         y = MARGIN;
         y = drawTableHeader(doc, y, cols);
@@ -310,10 +317,15 @@ const PdfExport = (function () {
         doc.rect(x, y, c.w, rowH);
         if (c.key === 'desc') {
           doc.setFont(undefined, 'normal');
-          doc.setFontSize(8);
+          doc.setFontSize(9);
           doc.text(descLines, x + 1.5, y + 5);
+        } else if (c.key === 'sno') {
+          doc.setFont(undefined, 'bold');
+          doc.setFontSize(9);
+          const tx = x + c.w / 2;
+          doc.text(String(vals[c.key] || ''), tx, y + 5, { align: 'center' });
         } else {
-          doc.setFont(undefined, 'normal');
+          doc.setFont(undefined, c.key === 'total' ? 'bold' : 'normal');
           doc.setFontSize(8);
           const tx = c.align === 'center' ? x + c.w / 2 : c.align === 'right' ? x + c.w - 1.5 : x + 1.5;
           doc.text(String(vals[c.key] || ''), tx, y + 5, { align: c.align === 'left' ? 'left' : c.align });
@@ -499,19 +511,19 @@ const PdfExport = (function () {
   }
 
   async function drawInvoiceBottom(doc, data, y) {
-    y = ensureSpace(doc, y, 70);
+    y = ensureSpace(doc, y, 85);
     const t = data.totals;
     const bank = data.bank || (typeof BANK !== 'undefined' ? BANK : {});
 
-    // GST rates for labels
     const gstRates = (t.computed || []).map((it) => Number(it.gst) || 0).filter((r) => r > 0);
     const mainGst = gstRates.length ? gstRates[0] : 18;
     const halfGst = Utils.round2(mainGst / 2);
 
-    const leftW = CONTENT_W * 0.42;
-    const midW = CONTENT_W * 0.22;
+    // Proportions closer to reference: bank | QR | totals
+    const leftW = CONTENT_W * 0.38;
+    const midW = CONTENT_W * 0.28;
     const rightW = CONTENT_W - leftW - midW;
-    const boxH = 38;
+    const boxH = 46;
     const boxTop = y;
 
     doc.setDrawColor(0, 0, 0);
@@ -520,103 +532,112 @@ const PdfExport = (function () {
     // Bank details (left)
     doc.rect(MARGIN, boxTop, leftW, boxH);
     doc.setFont(undefined, 'bold');
-    doc.setFontSize(8.5);
-    doc.text('Bank Details', MARGIN + 2, boxTop + 5);
+    doc.setFontSize(9);
+    doc.text('Bank Details', MARGIN + 2.5, boxTop + 5.5);
     doc.setFont(undefined, 'normal');
-    doc.setFontSize(7.5);
-    let ly = boxTop + 10;
-    const bankLines = [
+    doc.setFontSize(8);
+    let ly = boxTop + 11;
+    [
       'Bank Name :- ' + (bank.name || ''),
       'Account No. ' + (bank.accountNo || ''),
       'IFSC Code :- ' + (bank.ifsc || ''),
       'UPI :- ' + (bank.upi || ''),
-    ];
-    bankLines.forEach((line) => {
-      doc.text(line, MARGIN + 2, ly);
-      ly += 4.2;
+    ].forEach((line) => {
+      doc.text(line, MARGIN + 2.5, ly);
+      ly += 5;
     });
 
-    // QR middle
+    // QR middle — larger
     doc.rect(MARGIN + leftW, boxTop, midW, boxH);
     doc.setFont(undefined, 'bold');
-    doc.setFontSize(7.5);
-    doc.text('Scan for Pay', MARGIN + leftW + midW / 2, boxTop + 4.5, { align: 'center' });
+    doc.setFontSize(8);
+    doc.text('Scan for Pay', MARGIN + leftW + midW / 2, boxTop + 5, { align: 'center' });
     const upiUri = Utils.buildUpiUri(t.finalAmount, data.meta.quoteNo);
     const qrData = await loadQrDataUrl(upiUri);
+    const qSize = 34;
+    const qx = MARGIN + leftW + (midW - qSize) / 2;
+    const qy = boxTop + 8;
     if (qrData) {
       try {
-        const qSize = 26;
-        const qx = MARGIN + leftW + (midW - qSize) / 2;
-        const qy = boxTop + 7;
         doc.addImage(qrData, 'PNG', qx, qy, qSize, qSize);
       } catch (e) {
         doc.setFont(undefined, 'normal');
         doc.setFontSize(7);
-        doc.text('QR unavailable', MARGIN + leftW + midW / 2, boxTop + 20, { align: 'center' });
+        doc.text('QR unavailable', MARGIN + leftW + midW / 2, boxTop + 24, { align: 'center' });
       }
     } else {
       doc.setFont(undefined, 'normal');
       doc.setFontSize(7);
-      doc.text('QR needs internet', MARGIN + leftW + midW / 2, boxTop + 20, { align: 'center' });
+      doc.text('QR needs internet', MARGIN + leftW + midW / 2, boxTop + 24, { align: 'center' });
     }
 
     // Totals right
     const tx = MARGIN + leftW + midW;
-    const rowH = 7.5;
-    const totalRows = [
-      ['Taxable Amount', Utils.fmtMoney(t.taxable)],
-    ];
+    const rowH = 9;
+    const totalRows = [['Taxable Amount', Utils.fmtMoney(t.taxable)]];
     if (data.meta.gstType === 'IGST') {
-      totalRows.push(['IGST ' + mainGst + '%', Utils.fmtMoney(t.igst)]);
+      totalRows.push(['IGST  ' + mainGst + '%', Utils.fmtMoney(t.igst)]);
     } else {
-      totalRows.push(['CGST ' + halfGst + '%', Utils.fmtMoney(t.cgst)]);
-      totalRows.push(['SGST ' + halfGst + '%', Utils.fmtMoney(t.sgst)]);
+      totalRows.push(['CGST  ' + halfGst + '%', Utils.fmtMoney(t.cgst)]);
+      totalRows.push(['SGST  ' + halfGst + '%', Utils.fmtMoney(t.sgst)]);
     }
     let ry = boxTop;
     totalRows.forEach(([label, val]) => {
       doc.rect(tx, ry, rightW, rowH);
-      doc.setFont(undefined, 'normal');
+      doc.setFont(undefined, 'bold');
       doc.setFontSize(8);
-      doc.text(label, tx + 2, ry + rowH / 2 + 1.2);
-      doc.text(String(val), tx + rightW - 2, ry + rowH / 2 + 1.2, { align: 'right' });
+      doc.text(label, tx + 2, ry + rowH / 2 + 1.3);
+      doc.setFont(undefined, 'normal');
+      doc.text(String(val), tx + rightW - 2, ry + rowH / 2 + 1.3, { align: 'right' });
       ry += rowH;
     });
     const gtH = boxH - (ry - boxTop);
-    doc.setFillColor(230, 236, 245);
+    doc.setFillColor(220, 230, 245);
     doc.rect(tx, ry, rightW, gtH, 'FD');
     doc.setFont(undefined, 'bold');
-    doc.setFontSize(9);
-    doc.text('Grand Total', tx + 2, ry + gtH / 2 + 1.2);
-    doc.text(Utils.fmtMoney(t.finalAmount), tx + rightW - 2, ry + gtH / 2 + 1.2, { align: 'right' });
+    doc.setFontSize(10);
+    doc.text('Grand Total', tx + 2, ry + gtH / 2 + 1.4);
+    doc.text(Utils.fmtMoney(t.finalAmount), tx + rightW - 2, ry + gtH / 2 + 1.4, { align: 'right' });
 
     y = boxTop + boxH;
 
-    // Amount in words full width
-    const currencyLabel = data.meta.currency === 'USD' ? 'US Dollars' : 'Rupees';
-    const wordsText = Utils.amountInWords(t.finalAmount, currencyLabel);
-    const wordsH = 10;
-    doc.setFillColor(224, 234, 246);
-    doc.rect(MARGIN, y, CONTENT_W, wordsH, 'FD');
+    // Amount in Words — reference style: label cell + words cell (full width bar)
+    const wordsH = 11;
+    const labelW = CONTENT_W * 0.28;
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.3);
+    doc.setFillColor(200, 220, 240);
+    doc.rect(MARGIN, y, labelW, wordsH, 'FD');
+    doc.setFillColor(210, 228, 245);
+    doc.rect(MARGIN + labelW, y, CONTENT_W - labelW, wordsH, 'FD');
     doc.setFont(undefined, 'bold');
-    doc.setFontSize(8);
-    doc.text('Amount in Words :-  ' + wordsText, MARGIN + 2, y + 6.2);
-    y += wordsH + 4;
+    doc.setFontSize(9);
+    doc.text('Amount in Words :-', MARGIN + labelW / 2, y + 7, { align: 'center' });
+    const currencyLabel = data.meta.currency === 'USD' ? 'US Dollars' : 'Rupees';
+    let wordsText = Utils.amountInWords(t.finalAmount, currencyLabel);
+    // Match reference "INR … Rupees Only"
+    if (data.meta.currency !== 'USD' && !/^INR/i.test(wordsText)) {
+      wordsText = 'INR ' + wordsText;
+    }
+    doc.setFont(undefined, 'bold');
+    doc.setFontSize(8.5);
+    doc.text(wordsText, MARGIN + labelW + 3, y + 7);
+    y += wordsH;
 
-    // Signature only (no long terms on invoice by default)
-    y = ensureSpace(doc, y, 36);
+    // Signature strip
     const sigBoxTop = y;
-    const sigBoxH = 32;
+    const sigBoxH = 30;
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.3);
     doc.rect(MARGIN, sigBoxTop, CONTENT_W, sigBoxH);
     doc.setFont(undefined, 'bold');
     doc.setFontSize(9);
     doc.text('FOR ' + (data.company.name || 'COMPANY').toUpperCase(), PAGE_W - MARGIN - 3, sigBoxTop + 6, { align: 'right' });
-    const stampW = 20;
-    const stampH = 20 * 1111 / 1416;
+    const stampW = 22;
+    const stampH = 22 * 1111 / 1416;
     if (typeof SIGNATURE_DATA_URI !== 'undefined' && SIGNATURE_DATA_URI) {
       try {
-        doc.addImage(SIGNATURE_DATA_URI, 'JPEG', PAGE_W - MARGIN - 3 - stampW, sigBoxTop + 8, stampW, stampH);
+        doc.addImage(SIGNATURE_DATA_URI, 'JPEG', PAGE_W - MARGIN - 3 - stampW, sigBoxTop + 7, stampW, stampH);
       } catch (e) {}
     }
     doc.setFont(undefined, 'normal');
