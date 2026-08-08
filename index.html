@@ -79,15 +79,29 @@
     <div id="customerList" class="history-list" style="margin-top:10px"></div>
   </section>
 
-  <!-- QUOTATION META -->
+  <!-- DOC META -->
   <section class="card">
-    <h2 class="card__title">Quotation Details</h2>
+    <h2 class="card__title">Document Details</h2>
+    <label>Document Type
+      <select id="docType">
+        <option value="quotation" selected>Quotation</option>
+        <option value="invoice">Tax Invoice</option>
+      </select>
+    </label>
     <div class="grid2">
-      <label>Quotation No.
+      <label id="docNoLabel">Quotation No.
         <input type="text" id="quoteNo" />
       </label>
       <label>Date
         <input type="date" id="quoteDate" />
+      </label>
+    </div>
+    <div class="grid2" id="poRow" style="display:none">
+      <label>Purchase Order No.
+        <input type="text" id="poNumber" placeholder="e.g. 4500494207" />
+      </label>
+      <label>PO Date
+        <input type="date" id="poDate" />
       </label>
     </div>
     <div class="grid2">
@@ -104,8 +118,8 @@
         </select>
       </label>
     </div>
-    <label>Subject
-      <input type="text" id="subject" placeholder="e.g. Quotation for SS Fabrication Work" />
+    <label>Subject / Description
+      <input type="text" id="subject" placeholder="e.g. Quotation / Invoice for SS Fabrication Work" />
     </label>
   </section>
 
@@ -170,6 +184,7 @@ Validity: - the offer is valid for period of 10 days from the date of the offer.
 
   <div class="action-bar">
     <button class="btn btn--primary" id="genPdfBtn" type="button">Download PDF</button>
+    <p class="hint" id="docTypeHint">Quotation PDF. Invoice mode mein UPI QR + bank details aayenge.</p>
     <button class="btn btn--primary" id="genDocxBtn" type="button">Download Word</button>
     <button class="btn btn--ghost" id="clearBtn" type="button">Clear Form</button>
   </div>

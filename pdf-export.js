@@ -10,29 +10,33 @@ const PdfExport = (function () {
   const CONTENT_W = PAGE_W - MARGIN * 2;
   const MIDX = MARGIN + CONTENT_W / 2;
 
-  function generate(data) {
+  async function generate(data) {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const isInvoice = data.meta && data.meta.docType === 'invoice';
 
     let y = MARGIN;
     y = drawHeaderBox(doc, data, y);
-    const bodyTop = y; // continuous body frame starts here (items → signature)
+    const bodyTop = y;
     y = drawItemsTable(doc, data, y);
 
-    // Push totals/terms/signature down so the quotation fills the A4 page
-    const bottomH = estimateBottomHeight(data);
+    const bottomH = estimateBottomHeight(data) + (isInvoice ? 28 : 0);
     const minY = PAGE_H - MARGIN - bottomH;
     if (y < minY) y = minY;
 
-    y = drawTotalsAndWords(doc, data, y);
-    y = drawTermsAndSignature(doc, data, y);
+    if (isInvoice) {
+      y = await drawInvoiceBottom(doc, data, y);
+    } else {
+      y = drawTotalsAndWords(doc, data, y);
+      y = drawTermsAndSignature(doc, data, y);
+    }
 
-    // Continuous outer border around items + empty space + totals + terms + signature
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.4);
     doc.rect(MARGIN, bodyTop, CONTENT_W, y - bodyTop);
 
-    const filename = `Quotation_${(data.meta.quoteNo || 'draft').replace(/[^\w-]/g, '_')}.pdf`;
+    const prefix = isInvoice ? 'Invoice' : 'Quotation';
+    const filename = prefix + '_' + (data.meta.quoteNo || 'draft').replace(/[^\w\/-]/g, '_') + '.pdf';
     const blob = doc.output('blob');
     FileSaver.saveOrShare(blob, filename, 'application/pdf').then((res) => {
       if (res.method === 'failed') {
@@ -88,7 +92,8 @@ const PdfExport = (function () {
     doc.setFont(undefined, 'bold');
     doc.setFontSize(12);
     doc.setTextColor(20, 20, 20);
-    doc.text('QUOTATION', PAGE_W / 2, y + rTitleH / 2 + 1.6, { align: 'center' });
+    const titleTxt = (data.meta && data.meta.docType === 'invoice') ? 'Tax Invoice' : 'QUOTATION';
+    doc.text(titleTxt, PAGE_W / 2, y + rTitleH / 2 + 1.6, { align: 'center' });
     y += rTitleH;
     hLine(doc, y);
 
@@ -107,23 +112,34 @@ const PdfExport = (function () {
     doc.setTextColor(26, 61, 156);
     doc.text(data.company.name || 'Company Name', PAGE_W / 2, y + 9, { align: 'center' });
     doc.setFont(undefined, 'normal');
-    doc.setFontSize(8.5);
+    doc.setFontSize(8);
     doc.setTextColor(40, 40, 40);
-    doc.text(data.company.address || '', PAGE_W / 2, y + 15, { align: 'center', maxWidth: CONTENT_W - 46 });
+    if (data.meta && data.meta.docType === 'invoice') {
+      const office = 'Office :' + (data.company.address || '');
+      const emailLine = 'Email :- ' + (data.company.email || '');
+      doc.text(office, PAGE_W / 2, y + 13.5, { align: 'center', maxWidth: CONTENT_W - 46 });
+      doc.text(emailLine, PAGE_W / 2, y + 17.5, { align: 'center' });
+    } else {
+      doc.setFontSize(8.5);
+      doc.text(data.company.address || '', PAGE_W / 2, y + 15, { align: 'center', maxWidth: CONTENT_W - 46 });
+    }
     y += rBrandH;
     hLine(doc, y);
 
     // Row: GSTIN Number / Mobile Number
-    y = twoColRowLeftLabel(doc, y, 7, `GSTIN Number :- ${data.company.gstin || ''}`, `Mobile Number :- ${data.company.phone || ''}`, { bold: true, size: 9 });
+    const mob = (data.meta && data.meta.docType === 'invoice' && data.company.phone && !String(data.company.phone).startsWith('+'))
+      ? ('+91-' + data.company.phone) : (data.company.phone || '');
+    y = twoColRowLeftLabel(doc, y, 7, 'GSTIN Number :- ' + (data.company.gstin || ''), 'Mobile Number :- ' + mob, { bold: true, size: 9 });
     hLine(doc, y);
 
     // Row: Quotation No. / Date
-    y = twoColRowLeftLabel(doc, y, 7, `Quotation No.: ${data.meta.quoteNo || ''}`, `Date :- ${Utils.formatDateDMY(data.meta.date)}`, { bold: true, size: 9 });
+    const noLabel = (data.meta && data.meta.docType === 'invoice') ? 'INVOICE No.:' : 'Quotation No.:';
+    y = twoColRowLeftLabel(doc, y, 7, noLabel + ' ' + (data.meta.quoteNo || ''), 'Date :- ' + Utils.formatDateDMY(data.meta.date), { bold: true, size: 9 });
     hLine(doc, y);
 
     // Row: Bill To block (multi-line, left aligned, full width)
     const billLines = [];
-    billLines.push({ text: 'To,', bold: true });
+    billLines.push({ text: (data.meta && data.meta.docType === 'invoice') ? 'Bill To' : 'To,', bold: true });
     if (data.customer.name) billLines.push({ text: data.customer.name, bold: true });
     if (data.customer.address) {
       doc.setFontSize(9);
@@ -163,6 +179,20 @@ const PdfExport = (function () {
     y += rBillH;
     hLine(doc, y);
 
+    // PO row for invoice
+    if (data.meta && data.meta.docType === 'invoice' && (data.meta.poNumber || data.meta.poDate)) {
+      const poH = 7;
+      doc.setFont(undefined, 'bold');
+      doc.setFontSize(9);
+      const left = 'Purchase Order Number :- ' + (data.meta.poNumber || '-');
+      const right = 'Date :- ' + (data.meta.poDate ? Utils.formatDateDMY(data.meta.poDate) : '-');
+      doc.text(left, MARGIN + 2, y + poH / 2 + 1.3);
+      doc.text(right, MARGIN + CONTENT_W - 2, y + poH / 2 + 1.3, { align: 'right' });
+      doc.setFont(undefined, 'normal');
+      y += poH;
+      hLine(doc, y);
+    }
+
     // Outer border around the whole header box
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.4);
@@ -184,80 +214,109 @@ const PdfExport = (function () {
 
   // ---- Item table ----
 
-  // Column layout (mm), total = CONTENT_W (186)
-  const COLS = [
-    { key: 'sno', label: 'Sr.No.', w: 10, align: 'center' },
-    { key: 'desc', label: 'Material / Service Description', w: 64, align: 'left' },
-    { key: 'hsn', label: 'HSN/SAC', w: 16, align: 'center' },
-    { key: 'qty', label: 'Qty.', w: 12, align: 'center' },
-    { key: 'rate', label: 'Unit Rate', w: 18, align: 'right' },
-    { key: 'disc', label: 'Disc.%', w: 12, align: 'center' },
-    { key: 'gst', label: 'GST%', w: 12, align: 'center' },
-    { key: 'gstAmt', label: 'GST Amt', w: 18, align: 'right' },
-    { key: 'total', label: 'Amount', w: 24, align: 'right' },
-  ];
+  function getCols(isInvoice) {
+    if (isInvoice) {
+      // Match reference Tax Invoice columns (no GST columns in body table)
+      return [
+        { key: 'sno', label: 'Sr.No.', w: 12, align: 'center' },
+        { key: 'desc', label: 'Material/ Service Descriptions', w: 72, align: 'left' },
+        { key: 'hsn', label: 'HSN/SAC\nCODE', w: 22, align: 'center' },
+        { key: 'qty', label: 'Qty.', w: 16, align: 'center' },
+        { key: 'rate', label: 'Unit Rate', w: 22, align: 'right' },
+        { key: 'disc', label: 'Disc. %', w: 16, align: 'center' },
+        { key: 'total', label: 'Amount\n(in Rupees)', w: 26, align: 'right' },
+      ];
+    }
+    return [
+      { key: 'sno', label: 'Sr.No.', w: 10, align: 'center' },
+      { key: 'desc', label: 'Material / Service Description', w: 64, align: 'left' },
+      { key: 'hsn', label: 'HSN/SAC', w: 16, align: 'center' },
+      { key: 'qty', label: 'Qty.', w: 12, align: 'center' },
+      { key: 'rate', label: 'Unit Rate', w: 18, align: 'right' },
+      { key: 'disc', label: 'Disc.%', w: 12, align: 'center' },
+      { key: 'gst', label: 'GST%', w: 12, align: 'center' },
+      { key: 'gstAmt', label: 'GST Amt', w: 18, align: 'right' },
+      { key: 'total', label: 'Amount', w: 24, align: 'right' },
+    ];
+  }
 
-  function colX(idx) {
+  function colX(cols, idx) {
     let x = MARGIN;
-    for (let i = 0; i < idx; i++) x += COLS[i].w;
+    for (let i = 0; i < idx; i++) x += cols[i].w;
     return x;
   }
 
-  function drawTableHeader(doc, y) {
+  function drawTableHeader(doc, y, cols) {
+    const headH = 10;
     doc.setFillColor(235, 238, 243);
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.3);
-    doc.rect(MARGIN, y, CONTENT_W, 8, 'FD');
+    doc.rect(MARGIN, y, CONTENT_W, headH, 'FD');
     doc.setFont(undefined, 'bold');
-    doc.setFontSize(7.8);
+    doc.setFontSize(7.5);
     doc.setTextColor(20, 20, 20);
-    COLS.forEach((c, i) => {
-      const x = colX(i);
-      doc.rect(x, y, c.w, 8);
+    cols.forEach((c, i) => {
+      const x = colX(cols, i);
+      doc.rect(x, y, c.w, headH);
       const tx = c.align === 'center' ? x + c.w / 2 : c.align === 'right' ? x + c.w - 1.5 : x + 1.5;
-      const lines = doc.splitTextToSize(c.label, c.w - 2);
-      doc.text(lines, tx, y + 3.6, { align: c.align === 'left' ? 'left' : c.align });
+      const lines = String(c.label).split('\n');
+      const startY = y + (headH - lines.length * 3.2) / 2 + 2.5;
+      lines.forEach((ln, li) => {
+        doc.text(ln, tx, startY + li * 3.2, { align: c.align === 'left' ? 'left' : c.align });
+      });
     });
     doc.setFont(undefined, 'normal');
-    return y + 8;
+    return y + headH;
   }
 
   function drawItemsTable(doc, data, y) {
+    const isInvoice = data.meta && data.meta.docType === 'invoice';
+    const cols = getCols(isInvoice);
     doc.setFontSize(8);
-    y = drawTableHeader(doc, y);
+    y = drawTableHeader(doc, y, cols);
 
     data.totals.computed.forEach((it, idx) => {
-      const descLines = doc.splitTextToSize(it.desc || '', COLS[1].w - 3);
-      const rowH = Math.max(7, descLines.length * 3.6 + 2);
+      const descLines = doc.splitTextToSize(it.desc || '', cols[1].w - 3);
+      // Invoice: taller rows like reference (min space for description block)
+      const minH = isInvoice ? 22 : 7;
+      const rowH = Math.max(minH, descLines.length * 3.6 + 4);
 
-      if (y + rowH > PAGE_H - MARGIN - 35) {
+      if (y + rowH > PAGE_H - MARGIN - 55) {
         doc.addPage();
         y = MARGIN;
-        y = drawTableHeader(doc, y);
+        y = drawTableHeader(doc, y, cols);
       }
+
+      const qtyStr = isInvoice
+        ? (String(it.qty).padStart(2, '0') + ' ' + (it.unit || 'EA')).trim()
+        : (it.qty + ' ' + (it.unit || '')).trim();
 
       const vals = {
         sno: String(idx + 1),
         desc: null,
-        hsn: it.hsn || '-',
-        qty: `${it.qty} ${it.unit || ''}`.trim(),
+        hsn: it.hsn || '',
+        qty: qtyStr,
         rate: Utils.fmtMoney(it.rate),
-        disc: it.disc ? `${it.disc}%` : '-',
-        gst: `${it.gst}%`,
+        disc: (it.disc ? Utils.fmtMoney(it.disc) : '0.00'),
+        gst: it.gst + '%',
         gstAmt: Utils.fmtMoney(it.gstAmt),
         total: Utils.fmtMoney(it.taxable),
       };
 
       doc.setDrawColor(0, 0, 0);
-      doc.setLineWidth(0.2);
-      COLS.forEach((c, i) => {
-        const x = colX(i);
+      doc.setLineWidth(0.25);
+      cols.forEach((c, i) => {
+        const x = colX(cols, i);
         doc.rect(x, y, c.w, rowH);
         if (c.key === 'desc') {
-          doc.text(descLines, x + 1.5, y + 4);
+          doc.setFont(undefined, 'normal');
+          doc.setFontSize(8);
+          doc.text(descLines, x + 1.5, y + 5);
         } else {
+          doc.setFont(undefined, 'normal');
+          doc.setFontSize(8);
           const tx = c.align === 'center' ? x + c.w / 2 : c.align === 'right' ? x + c.w - 1.5 : x + 1.5;
-          doc.text(vals[c.key], tx, y + rowH / 2 + 1.2, { align: c.align === 'left' ? 'left' : c.align });
+          doc.text(String(vals[c.key] || ''), tx, y + 5, { align: c.align === 'left' ? 'left' : c.align });
         }
       });
       y += rowH;
@@ -420,5 +479,152 @@ const PdfExport = (function () {
     return sigBoxTop + sigBoxH;
   }
 
+
+  async function loadQrDataUrl(upiUri) {
+    try {
+      const qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data=' + encodeURIComponent(upiUri);
+      const res = await fetch(qrUrl);
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      return await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = reject;
+        r.readAsDataURL(blob);
+      });
+    } catch (e) {
+      console.warn('QR load failed', e);
+      return null;
+    }
+  }
+
+  async function drawInvoiceBottom(doc, data, y) {
+    y = ensureSpace(doc, y, 70);
+    const t = data.totals;
+    const bank = data.bank || (typeof BANK !== 'undefined' ? BANK : {});
+
+    // GST rates for labels
+    const gstRates = (t.computed || []).map((it) => Number(it.gst) || 0).filter((r) => r > 0);
+    const mainGst = gstRates.length ? gstRates[0] : 18;
+    const halfGst = Utils.round2(mainGst / 2);
+
+    const leftW = CONTENT_W * 0.42;
+    const midW = CONTENT_W * 0.22;
+    const rightW = CONTENT_W - leftW - midW;
+    const boxH = 38;
+    const boxTop = y;
+
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.3);
+
+    // Bank details (left)
+    doc.rect(MARGIN, boxTop, leftW, boxH);
+    doc.setFont(undefined, 'bold');
+    doc.setFontSize(8.5);
+    doc.text('Bank Details', MARGIN + 2, boxTop + 5);
+    doc.setFont(undefined, 'normal');
+    doc.setFontSize(7.5);
+    let ly = boxTop + 10;
+    const bankLines = [
+      'Bank Name :- ' + (bank.name || ''),
+      'Account No. ' + (bank.accountNo || ''),
+      'IFSC Code :- ' + (bank.ifsc || ''),
+      'UPI :- ' + (bank.upi || ''),
+    ];
+    bankLines.forEach((line) => {
+      doc.text(line, MARGIN + 2, ly);
+      ly += 4.2;
+    });
+
+    // QR middle
+    doc.rect(MARGIN + leftW, boxTop, midW, boxH);
+    doc.setFont(undefined, 'bold');
+    doc.setFontSize(7.5);
+    doc.text('Scan for Pay', MARGIN + leftW + midW / 2, boxTop + 4.5, { align: 'center' });
+    const upiUri = Utils.buildUpiUri(t.finalAmount, data.meta.quoteNo);
+    const qrData = await loadQrDataUrl(upiUri);
+    if (qrData) {
+      try {
+        const qSize = 26;
+        const qx = MARGIN + leftW + (midW - qSize) / 2;
+        const qy = boxTop + 7;
+        doc.addImage(qrData, 'PNG', qx, qy, qSize, qSize);
+      } catch (e) {
+        doc.setFont(undefined, 'normal');
+        doc.setFontSize(7);
+        doc.text('QR unavailable', MARGIN + leftW + midW / 2, boxTop + 20, { align: 'center' });
+      }
+    } else {
+      doc.setFont(undefined, 'normal');
+      doc.setFontSize(7);
+      doc.text('QR needs internet', MARGIN + leftW + midW / 2, boxTop + 20, { align: 'center' });
+    }
+
+    // Totals right
+    const tx = MARGIN + leftW + midW;
+    const rowH = 7.5;
+    const totalRows = [
+      ['Taxable Amount', Utils.fmtMoney(t.taxable)],
+    ];
+    if (data.meta.gstType === 'IGST') {
+      totalRows.push(['IGST ' + mainGst + '%', Utils.fmtMoney(t.igst)]);
+    } else {
+      totalRows.push(['CGST ' + halfGst + '%', Utils.fmtMoney(t.cgst)]);
+      totalRows.push(['SGST ' + halfGst + '%', Utils.fmtMoney(t.sgst)]);
+    }
+    let ry = boxTop;
+    totalRows.forEach(([label, val]) => {
+      doc.rect(tx, ry, rightW, rowH);
+      doc.setFont(undefined, 'normal');
+      doc.setFontSize(8);
+      doc.text(label, tx + 2, ry + rowH / 2 + 1.2);
+      doc.text(String(val), tx + rightW - 2, ry + rowH / 2 + 1.2, { align: 'right' });
+      ry += rowH;
+    });
+    const gtH = boxH - (ry - boxTop);
+    doc.setFillColor(230, 236, 245);
+    doc.rect(tx, ry, rightW, gtH, 'FD');
+    doc.setFont(undefined, 'bold');
+    doc.setFontSize(9);
+    doc.text('Grand Total', tx + 2, ry + gtH / 2 + 1.2);
+    doc.text(Utils.fmtMoney(t.finalAmount), tx + rightW - 2, ry + gtH / 2 + 1.2, { align: 'right' });
+
+    y = boxTop + boxH;
+
+    // Amount in words full width
+    const currencyLabel = data.meta.currency === 'USD' ? 'US Dollars' : 'Rupees';
+    const wordsText = Utils.amountInWords(t.finalAmount, currencyLabel);
+    const wordsH = 10;
+    doc.setFillColor(224, 234, 246);
+    doc.rect(MARGIN, y, CONTENT_W, wordsH, 'FD');
+    doc.setFont(undefined, 'bold');
+    doc.setFontSize(8);
+    doc.text('Amount in Words :-  ' + wordsText, MARGIN + 2, y + 6.2);
+    y += wordsH + 4;
+
+    // Signature only (no long terms on invoice by default)
+    y = ensureSpace(doc, y, 36);
+    const sigBoxTop = y;
+    const sigBoxH = 32;
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.3);
+    doc.rect(MARGIN, sigBoxTop, CONTENT_W, sigBoxH);
+    doc.setFont(undefined, 'bold');
+    doc.setFontSize(9);
+    doc.text('FOR ' + (data.company.name || 'COMPANY').toUpperCase(), PAGE_W - MARGIN - 3, sigBoxTop + 6, { align: 'right' });
+    const stampW = 20;
+    const stampH = 20 * 1111 / 1416;
+    if (typeof SIGNATURE_DATA_URI !== 'undefined' && SIGNATURE_DATA_URI) {
+      try {
+        doc.addImage(SIGNATURE_DATA_URI, 'JPEG', PAGE_W - MARGIN - 3 - stampW, sigBoxTop + 8, stampW, stampH);
+      } catch (e) {}
+    }
+    doc.setFont(undefined, 'normal');
+    doc.setFontSize(8.5);
+    doc.text('Authorised Signatory', PAGE_W - MARGIN - 3, sigBoxTop + sigBoxH - 3, { align: 'right' });
+    return sigBoxTop + sigBoxH;
+  }
+
   return { generate };
 })();
+

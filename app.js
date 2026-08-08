@@ -196,12 +196,16 @@ const QGenApp = (function () {
         contact: document.getElementById('custContact').value,
       },
       meta: {
+        docType: (document.getElementById('docType') || {}).value || 'quotation',
         quoteNo: document.getElementById('quoteNo').value,
         date: document.getElementById('quoteDate').value,
         subject: document.getElementById('subject').value,
         gstType,
         currency,
+        poNumber: (document.getElementById('poNumber') || {}).value || '',
+        poDate: (document.getElementById('poDate') || {}).value || '',
       },
+      bank: (typeof BANK !== 'undefined') ? BANK : null,
       terms: {
         deliveryTime: '',
         paymentTerms: '',
@@ -251,6 +255,13 @@ const QGenApp = (function () {
     document.getElementById('subject').value = data.meta?.subject || '';
     document.getElementById('gstType').value = data.meta?.gstType || 'CGST_SGST';
     document.getElementById('currency').value = data.meta?.currency || 'INR';
+    const dt = document.getElementById('docType');
+    if (dt) dt.value = data.meta?.docType || 'quotation';
+    const poN = document.getElementById('poNumber');
+    if (poN) poN.value = data.meta?.poNumber || '';
+    const poD = document.getElementById('poDate');
+    if (poD) poD.value = data.meta?.poDate || '';
+    if (typeof syncDocTypeUI === 'function') syncDocTypeUI();
 
     const termsEl = document.getElementById('termsText');
     if (termsEl) {
@@ -518,6 +529,48 @@ const QGenApp = (function () {
   function wireStaticControls() {
     const qn = document.getElementById('quoteNo');
     if (qn) qn.addEventListener('input', () => { qn.dataset.userEdited = '1'; });
+
+    function syncDocTypeUI() {
+      const dt = document.getElementById('docType');
+      const type = dt ? dt.value : 'quotation';
+      const isInv = type === 'invoice';
+      const poRow = document.getElementById('poRow');
+      if (poRow) poRow.style.display = isInv ? 'grid' : 'none';
+      const label = document.getElementById('docNoLabel');
+      if (label) {
+        const input = label.querySelector('input');
+        label.childNodes[0].textContent = isInv ? 'Invoice No. ' : 'Quotation No. ';
+        // keep input
+      }
+      const hint = document.getElementById('docTypeHint');
+      if (hint) {
+        hint.textContent = isInv
+          ? 'Tax Invoice PDF — bank details + UPI QR (total amount).'
+          : 'Quotation PDF. Invoice mode mein UPI QR + bank details aayenge.';
+      }
+      const qnEl = document.getElementById('quoteNo');
+      if (qnEl && !qnEl.dataset.userEdited) {
+        if (isInv) {
+          const lastInv = localStorage.getItem('qgen.lastInvoiceNo.v1');
+          qnEl.value = Utils.nextInvoiceNumber(lastInv);
+        } else if (typeof SerialSync !== 'undefined') {
+          SerialSync.peekNext().then((no) => { if (!qnEl.dataset.userEdited) qnEl.value = no; }).catch(() => {});
+        } else {
+          qnEl.value = Utils.nextQuotationNumber(Storage.getLastQuoteNo());
+        }
+      }
+    }
+    window.syncDocTypeUI = syncDocTypeUI;
+    const docTypeEl = document.getElementById('docType');
+    if (docTypeEl) {
+      docTypeEl.addEventListener('change', () => {
+        const qnEl = document.getElementById('quoteNo');
+        if (qnEl) delete qnEl.dataset.userEdited;
+        syncDocTypeUI();
+        autosave();
+      });
+      syncDocTypeUI();
+    }
     document.getElementById('addItemBtn').addEventListener('click', () => {
       addItem();
       recalcAll();
@@ -554,17 +607,28 @@ const QGenApp = (function () {
       const btn = document.getElementById('genPdfBtn');
       btn.disabled = true;
       try {
-        if (typeof SerialSync !== 'undefined') {
+        const docType = (document.getElementById('docType') || {}).value || 'quotation';
+        if (docType === 'invoice') {
+          const qn = document.getElementById('quoteNo');
+          if (qn && !qn.dataset.userEdited) {
+            const lastInv = localStorage.getItem('qgen.lastInvoiceNo.v1');
+            qn.value = Utils.nextInvoiceNumber(lastInv);
+          }
+        } else if (typeof SerialSync !== 'undefined') {
           const reserved = await SerialSync.reserveNext();
           document.getElementById('quoteNo').value = reserved.quoteNo;
           if (reserved.source === 'cloud') toast('Serial synced: ' + reserved.quoteNo);
         }
         const data = collectData();
-        Storage.setLastQuoteNo(data.meta.quoteNo);
+        if (data.meta.docType === 'invoice') {
+          localStorage.setItem('qgen.lastInvoiceNo.v1', data.meta.quoteNo);
+        } else {
+          Storage.setLastQuoteNo(data.meta.quoteNo);
+        }
         if (typeof SerialSync !== 'undefined') await SerialSync.saveHistory(data);
         else Storage.saveToHistory(data);
         await refreshHistoryList();
-        PdfExport.generate(data);
+        await PdfExport.generate(data);
       } finally {
         btn.disabled = false;
       }
@@ -654,7 +718,7 @@ const QGenApp = (function () {
     if (typeof SerialSync !== 'undefined' && !SerialSync.isConfigured()) {
       const w = document.getElementById('storageWarning');
       if (w) {
-        w.textContent = '⚠ Firebase URL serial-config.js mein set nahi hai — shared serial/history off hai.';
+        w.textContent = '⚠ Supabase URL/KEY serial-config.js mein set nahi hai — shared serial/history off hai.';
         w.classList.remove('hidden');
       }
     }

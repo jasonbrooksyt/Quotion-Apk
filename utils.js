@@ -10,6 +10,13 @@ const COMPANY = {
   email: 'kanakmechanical.fab@gmail.com',
 };
 
+const BANK = {
+  name: 'Axis Bank',
+  accountNo: '924020000607385',
+  ifsc: 'UTIB0002518',
+  upi: 'kanakmechanical@ybl',
+};
+
 const DEFAULT_TERMS = [
   'GST rate may be changed in final tax invoice as per type of Goods or service.',
   'Work Completion: - 30 days from date of receipts of your purchase order.',
@@ -128,5 +135,33 @@ const Utils = (function () {
     return lines;
   }
 
-  return { round2, fmtMoney, todayISO, formatDateDMY, addDaysISO, amountInWords, nextQuotationNumber, escapeHtml, wrapText };
+
+  function financialYearLabel(d) {
+    d = d || new Date();
+    const y = d.getFullYear();
+    const m = d.getMonth(); // 0=Jan
+    const start = m >= 3 ? y : y - 1; // FY starts April
+    return String(start).slice(-2) + '-' + String(start + 1).slice(-2);
+  }
+
+  function nextInvoiceNumber(lastNumber) {
+    const fy = financialYearLabel(new Date());
+    const prefix = 'GST/' + fy + '/';
+    if (!lastNumber) return prefix + '0001';
+    const m = String(lastNumber).match(/GST\/(\d{2}-\d{2})\/(\d+)/);
+    if (!m || m[1] !== fy) return prefix + '0001';
+    const next = String(Number(m[2]) + 1).padStart(4, '0');
+    return prefix + next;
+  }
+
+  function buildUpiUri(amount, invoiceNo) {
+    const pa = encodeURIComponent(BANK.upi || '');
+    const pn = encodeURIComponent(COMPANY.name || 'KMF');
+    const am = round2(amount || 0).toFixed(2);
+    const tn = encodeURIComponent(invoiceNo ? ('Invoice ' + invoiceNo) : 'Payment');
+    return 'upi://pay?pa=' + pa + '&pn=' + pn + '&am=' + am + '&cu=INR&tn=' + tn;
+  }
+
+  return { round2, fmtMoney, todayISO, formatDateDMY, addDaysISO, amountInWords, nextQuotationNumber, nextInvoiceNumber, financialYearLabel, buildUpiUri, escapeHtml, wrapText };
+
 })();
