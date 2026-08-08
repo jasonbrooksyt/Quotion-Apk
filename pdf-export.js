@@ -13,7 +13,7 @@ const PdfExport = (function () {
   async function generate(data) {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-    const isInvoice = data.meta && data.meta.docType === 'invoice';
+    const isInvoice = (data.meta && data.meta.docType === 'invoice') || (data.meta && /^GST\//i.test(String(data.meta.quoteNo || '')));
 
     let y = MARGIN;
     y = drawHeaderBox(doc, data, y);
@@ -270,7 +270,7 @@ const PdfExport = (function () {
   }
 
   function drawItemsTable(doc, data, y) {
-    const isInvoice = data.meta && data.meta.docType === 'invoice';
+    const isInvoice = (data.meta && data.meta.docType === 'invoice') || /^GST\//i.test(String((data.meta && data.meta.quoteNo) || ''));
     const cols = getCols(isInvoice);
     doc.setFontSize(8);
     y = drawTableHeader(doc, y, cols);
