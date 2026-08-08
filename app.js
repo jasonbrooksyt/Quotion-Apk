@@ -411,11 +411,18 @@ const QGenApp = (function () {
         gstin: document.getElementById('custGstin').value,
         contact: document.getElementById('custContact').value,
       };
-      if (typeof SerialSync !== 'undefined') await SerialSync.saveCustomer(cust);
-      else Storage.saveCustomer(cust);
+      let ok = true;
+      if (typeof SerialSync !== 'undefined') {
+        ok = await SerialSync.saveCustomer(cust);
+        if (!ok && SerialSync.isConfigured()) toast('Saved on phone, cloud sync failed — check internet');
+        else if (ok && SerialSync.isConfigured()) toast('Customer saved (synced both phones)');
+        else toast('Customer saved on this phone only (Supabase not set)');
+      } else {
+        Storage.saveCustomer(cust);
+        toast('Customer saved / updated');
+      }
       await refreshCustomerPicker();
       if (picker) picker.value = name;
-      toast('Customer saved / updated');
     });
 
     document.getElementById('deleteCustomerBtn').addEventListener('click', async () => {
@@ -576,6 +583,13 @@ const QGenApp = (function () {
           delete qnEl.dataset.userEdited;
           if (isInv) {
             qnEl.value = Utils.nextInvoiceNumber(localStorage.getItem('qgen.lastInvoiceNo.v1'));
+            if (typeof SerialSync !== 'undefined' && SerialSync.isConfigured()) {
+              SerialSync.peekInvoiceNext().then((no) => {
+                if (!qnEl.dataset.userEdited && (document.getElementById('docType') || {}).value === 'invoice') {
+                  qnEl.value = no;
+                }
+              }).catch(() => {});
+            }
           } else {
             qnEl.value = Utils.nextQuotationNumber(Storage.getLastQuoteNo());
             if (typeof SerialSync !== 'undefined') {
@@ -642,8 +656,11 @@ const QGenApp = (function () {
         const docType = (document.getElementById('docType') || {}).value || 'quotation';
         const qn = document.getElementById('quoteNo');
         if (docType === 'invoice') {
-          // Always ensure GST/FY/#### format for invoices
-          if (qn && !/^GST\/\d{2}-\d{2}\/\d+/i.test(qn.value || '')) {
+          if (typeof SerialSync !== 'undefined' && SerialSync.isConfigured()) {
+            const reserved = await SerialSync.reserveInvoiceNext();
+            if (qn) qn.value = reserved.quoteNo;
+            if (reserved.source === 'cloud') toast('Invoice serial synced: ' + reserved.quoteNo);
+          } else if (qn && !/^GST\/\d{2}-\d{2}\/\d+/i.test(qn.value || '')) {
             qn.value = Utils.nextInvoiceNumber(localStorage.getItem('qgen.lastInvoiceNo.v1'));
           }
         } else if (typeof SerialSync !== 'undefined') {
@@ -652,7 +669,6 @@ const QGenApp = (function () {
           if (reserved.source === 'cloud') toast('Serial synced: ' + reserved.quoteNo);
         }
         const data = collectData();
-        // Hard-set docType from UI so PDF never misses it
         data.meta.docType = docType;
         if (docType === 'invoice') {
           data.terms = { deliveryTime: '', paymentTerms: '', remarks: '', termsText: [] };
@@ -762,6 +778,18 @@ const QGenApp = (function () {
     loadDraftIntoForm();
     refreshHistoryList();
     recalcAll();
+
+    // Keep customers + recent docs in sync across phones (poll + on focus)
+    async function softRefreshCloud() {
+      try {
+        await refreshCustomerPicker();
+        await refreshHistoryList();
+      } catch (e) { /* ignore */ }
+    }
+    setInterval(softRefreshCloud, 20000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') softRefreshCloud();
+    });
   }
 
   function init() {
