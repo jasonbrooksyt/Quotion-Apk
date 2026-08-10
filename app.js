@@ -336,52 +336,25 @@ const QGenApp = (function () {
     } catch (e) {
       customers = Storage.listCustomers();
     }
-    if (picker) {
-      picker.innerHTML = '<option value="">— Select a saved customer —</option>' +
-        customers.map((c) => `<option value="${Utils.escapeHtml(c.name)}">${Utils.escapeHtml(c.name)}</option>`).join('');
+    if (!picker) return;
+    const prev = picker.value;
+    picker.innerHTML = '<option value="">— Select a saved customer —</option>' +
+      customers.map((c) => `<option value="${Utils.escapeHtml(c.name)}">${Utils.escapeHtml(c.name)}</option>`).join('');
+    // keep selection if still exists
+    if (prev && customers.some((c) => c.name === prev)) picker.value = prev;
+    updateCustomerActionHint();
+  }
+
+  function updateCustomerActionHint() {
+    const hint = document.getElementById('customerActionHint');
+    const picker = document.getElementById('savedCustomerPicker');
+    if (!hint) return;
+    const name = picker && picker.value;
+    if (name) {
+      hint.textContent = '"' + name + '" selected — form mein edit karke Save / Update, ya Delete Selected se hatao.';
+    } else {
+      hint.textContent = 'Dropdown se customer select karo — form load hoga. Phir Save / Update ya Delete Selected use karo.';
     }
-    const list = document.getElementById('customerList');
-    if (!list) return;
-    if (!customers.length) {
-      list.innerHTML = '<p class="hint">No saved customers yet.</p>';
-      return;
-    }
-    list.innerHTML = customers.map((c) => {
-      const name = Utils.escapeHtml(c.name || '');
-      return `
-        <div class="history-item" data-cust-name="${name}">
-          <div class="history-item__info">
-            <strong>${name}</strong>
-            <span>${Utils.escapeHtml(c.gstin || '')}</span>
-            <span>${Utils.escapeHtml((c.address || '').slice(0, 60))}</span>
-          </div>
-          <div class="history-item__actions">
-            <button type="button" class="btn btn--secondary" data-action="edit">Edit</button>
-            <button type="button" class="btn btn--ghost" data-action="delete">Delete</button>
-          </div>
-        </div>`;
-    }).join('');
-    list.querySelectorAll('.history-item').forEach((el) => {
-      const name = el.dataset.custName;
-      el.querySelector('[data-action="edit"]').addEventListener('click', async () => {
-        let customers2 = [];
-        try {
-          customers2 = typeof SerialSync !== 'undefined' ? await SerialSync.listCustomers() : Storage.listCustomers();
-        } catch (e) { customers2 = Storage.listCustomers(); }
-        const found = customers2.find((c) => c.name === name);
-        if (!found) { toast('Customer not found'); return; }
-        loadCustomerIntoForm(found);
-        toast('Loaded ' + name + ' for editing');
-        if (typeof window.scrollTo === 'function') window.scrollTo({ top: 0, behavior: 'smooth' });
-      });
-      el.querySelector('[data-action="delete"]').addEventListener('click', async () => {
-        if (!confirm('Delete saved customer "' + name + '"?')) return;
-        if (typeof SerialSync !== 'undefined') await SerialSync.deleteCustomer(name);
-        else Storage.deleteCustomer(name);
-        refreshCustomerPicker();
-        toast('Customer deleted');
-      });
-    });
   }
 
   function wireCustomerPicker() {
@@ -391,6 +364,7 @@ const QGenApp = (function () {
     if (picker) {
       picker.addEventListener('change', async (e) => {
         const name = e.target.value;
+        updateCustomerActionHint();
         if (!name) return;
         let customers = [];
         try {
@@ -399,6 +373,7 @@ const QGenApp = (function () {
         const found = customers.find((c) => c.name === name);
         if (!found) return;
         loadCustomerIntoForm(found);
+        toast('Loaded: ' + name);
       });
     }
 
@@ -836,7 +811,7 @@ const QGenApp = (function () {
         }
       } catch (e) { /* ignore */ }
     }
-    setInterval(softRefreshCloud, 5000);
+    setInterval(softRefreshCloud, 15000);
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         softRefreshCloud();
