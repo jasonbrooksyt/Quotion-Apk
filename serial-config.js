@@ -40,7 +40,7 @@
  * 4. Neeche URL + KEY paste karo
  */
 
-const SUPABASE_URL = 'https://ywwvpycpqieqgsszeqie.supabase.co/rest/v1/';
+const SUPABASE_URL = 'https://ywwvpycpqieqgsszeqie.supabase.co';
 // Example: 'https://abcdefgh.supabase.co'
 
 const SUPABASE_ANON_KEY = 'sb_publishable_1MVlZFVDGPK8Izk7b3VJ8g_HnYYBRz9';
