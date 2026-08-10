@@ -605,7 +605,7 @@ const QGenApp = (function () {
     });
 
     document.getElementById('clearBtn').addEventListener('click', () => {
-      if (!confirm('Clear the entire form? This cannot be undone.')) return;
+      if (!confirm('Start a new Quotation / Invoice? Current form will be cleared.')) return;
       Storage.clearDraft();
       itemsWrap.innerHTML = '';
       document.querySelectorAll('.card input, .card textarea')
