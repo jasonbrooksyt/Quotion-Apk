@@ -1,10 +1,22 @@
-/* serial-sync.js — Shared serial + customers + history via Supabase REST */
+/* serial-sync.js — Shared serial, customers, history via Supabase REST */
 
 const SerialSync = (function () {
+  var lastError = '';
+  var lastOkAt = 0;
 
   function isConfigured() {
     return typeof SUPABASE_URL === 'string' && SUPABASE_URL.trim().length > 10
       && typeof SUPABASE_ANON_KEY === 'string' && SUPABASE_ANON_KEY.trim().length > 20;
+  }
+
+  function getLastError() { return lastError; }
+  function getStatus() {
+    return {
+      configured: isConfigured(),
+      lastError: lastError,
+      lastOkAt: lastOkAt,
+      online: typeof navigator !== 'undefined' ? navigator.onLine : true,
+    };
   }
 
   function headers(extra) {
@@ -31,22 +43,45 @@ const SerialSync = (function () {
     });
     if (!res.ok) {
       var t = await res.text().catch(function () { return ''; });
-      throw new Error((opts.method || 'GET') + ' ' + path + ' ' + res.status + ' ' + t);
+      lastError = (opts.method || 'GET') + ' ' + path + ' → ' + res.status + ' ' + t.slice(0, 120);
+      throw new Error(lastError);
     }
+    lastError = '';
+    lastOkAt = Date.now();
     if (res.status === 204) return null;
     var text = await res.text();
     if (!text) return null;
     return JSON.parse(text);
   }
 
+  /** Test cloud connection — returns { ok, message } */
+  async function testConnection() {
+    if (!isConfigured()) {
+      return { ok: false, message: 'serial-config.js mein SUPABASE_URL / KEY set nahi hai' };
+    }
+    if (!navigator.onLine) {
+      return { ok: false, message: 'Internet off hai' };
+    }
+    try {
+      var rows = await sbFetch('kmf_counter?id=eq.1&select=id,last_seq,last_inv_seq');
+      if (!rows || !rows[0]) {
+        return { ok: false, message: 'kmf_counter row missing — SQL insert chalao' };
+      }
+      if (typeof rows[0].last_inv_seq !== 'number') {
+        return { ok: false, message: 'last_inv_seq column missing — ALTER TABLE SQL chalao' };
+      }
+      return { ok: true, message: 'Cloud connected' };
+    } catch (e) {
+      return { ok: false, message: e.message || String(e) };
+    }
+  }
+
   function yearPrefix() {
     return 'QT-' + new Date().getFullYear() + '-';
   }
-
   function formatNo(seq) {
     return yearPrefix() + String(seq).padStart(4, '0');
   }
-
   function parseSeq(quoteNo) {
     if (!quoteNo) return 0;
     var m = String(quoteNo).match(/QT-(\d{4})-(\d+)/);
@@ -54,7 +89,6 @@ const SerialSync = (function () {
     if (Number(m[1]) !== new Date().getFullYear()) return 0;
     return Number(m[2]) || 0;
   }
-
   function parseInvSeq(no) {
     if (!no) return 0;
     var fy = Utils.financialYearLabel(new Date());
@@ -62,57 +96,41 @@ const SerialSync = (function () {
     if (!m || m[1] !== fy) return 0;
     return Number(m[2]) || 0;
   }
-
   function formatInvNo(seq) {
-    var fy = Utils.financialYearLabel(new Date());
-    return 'GST/' + fy + '/' + String(seq).padStart(4, '0');
+    return 'GST/' + Utils.financialYearLabel(new Date()) + '/' + String(seq).padStart(4, '0');
   }
 
   async function peekNext() {
-    if (!isConfigured()) {
-      return Utils.nextQuotationNumber(Storage.getLastQuoteNo());
-    }
+    if (!isConfigured()) return Utils.nextQuotationNumber(Storage.getLastQuoteNo());
     try {
       var rows = await sbFetch('kmf_counter?id=eq.1&select=last_seq,last_no');
       var row = rows && rows[0];
       var last = row && typeof row.last_seq === 'number' ? row.last_seq : 0;
-      var localLast = parseSeq(Storage.getLastQuoteNo());
-      return formatNo(Math.max(last, localLast) + 1);
+      return formatNo(last + 1);
     } catch (e) {
-      console.warn('peekNext', e);
       return Utils.nextQuotationNumber(Storage.getLastQuoteNo());
     }
   }
 
   async function reserveNext() {
-    function localFallback() {
-      var no = Utils.nextQuotationNumber(Storage.getLastQuoteNo());
-      Storage.setLastQuoteNo(no);
-      return { quoteNo: no, source: 'local' };
+    if (!isConfigured()) {
+      return { quoteNo: null, source: 'error', error: 'Supabase not configured' };
     }
-    if (!isConfigured()) return localFallback();
     try {
       var rows = await sbFetch('kmf_counter?id=eq.1&select=last_seq,last_no');
       var row = rows && rows[0];
       var lastSeq = row && typeof row.last_seq === 'number' ? row.last_seq : 0;
-      var localLast = parseSeq(Storage.getLastQuoteNo());
-      if (localLast > lastSeq) lastSeq = localLast;
       var nextSeq = lastSeq + 1;
       var quoteNo = formatNo(nextSeq);
       await sbFetch('kmf_counter?id=eq.1', {
         method: 'PATCH',
         headers: { 'Prefer': 'return=minimal' },
-        body: {
-          last_seq: nextSeq,
-          last_no: quoteNo,
-          updated_at: new Date().toISOString(),
-        },
+        body: { last_seq: nextSeq, last_no: quoteNo, updated_at: new Date().toISOString() },
       });
       Storage.setLastQuoteNo(quoteNo);
       return { quoteNo: quoteNo, source: 'cloud' };
     } catch (e) {
-      console.warn('reserveNext', e);
-      return localFallback();
+      return { quoteNo: null, source: 'error', error: e.message || String(e) };
     }
   }
 
@@ -124,43 +142,31 @@ const SerialSync = (function () {
       var rows = await sbFetch('kmf_counter?id=eq.1&select=last_inv_seq,last_inv_no');
       var row = rows && rows[0];
       var last = row && typeof row.last_inv_seq === 'number' ? row.last_inv_seq : 0;
-      var localLast = parseInvSeq(localStorage.getItem('qgen.lastInvoiceNo.v1'));
-      return formatInvNo(Math.max(last, localLast) + 1);
+      return formatInvNo(last + 1);
     } catch (e) {
-      console.warn('peekInvoiceNext', e);
       return Utils.nextInvoiceNumber(localStorage.getItem('qgen.lastInvoiceNo.v1'));
     }
   }
 
   async function reserveInvoiceNext() {
-    function localFallback() {
-      var no = Utils.nextInvoiceNumber(localStorage.getItem('qgen.lastInvoiceNo.v1'));
-      localStorage.setItem('qgen.lastInvoiceNo.v1', no);
-      return { quoteNo: no, source: 'local' };
+    if (!isConfigured()) {
+      return { quoteNo: null, source: 'error', error: 'Supabase not configured' };
     }
-    if (!isConfigured()) return localFallback();
     try {
       var rows = await sbFetch('kmf_counter?id=eq.1&select=last_inv_seq,last_inv_no');
       var row = rows && rows[0];
       var lastSeq = row && typeof row.last_inv_seq === 'number' ? row.last_inv_seq : 0;
-      var localLast = parseInvSeq(localStorage.getItem('qgen.lastInvoiceNo.v1'));
-      if (localLast > lastSeq) lastSeq = localLast;
       var nextSeq = lastSeq + 1;
       var invNo = formatInvNo(nextSeq);
       await sbFetch('kmf_counter?id=eq.1', {
         method: 'PATCH',
         headers: { 'Prefer': 'return=minimal' },
-        body: {
-          last_inv_seq: nextSeq,
-          last_inv_no: invNo,
-          updated_at: new Date().toISOString(),
-        },
+        body: { last_inv_seq: nextSeq, last_inv_no: invNo, updated_at: new Date().toISOString() },
       });
       localStorage.setItem('qgen.lastInvoiceNo.v1', invNo);
       return { quoteNo: invNo, source: 'cloud' };
     } catch (e) {
-      console.warn('reserveInvoiceNext', e);
-      return localFallback();
+      return { quoteNo: null, source: 'error', error: e.message || String(e) };
     }
   }
 
@@ -169,16 +175,12 @@ const SerialSync = (function () {
     var quoteNo = quoteData.meta.quoteNo;
     var payload = Object.assign({}, quoteData, { savedAt: new Date().toISOString() });
     Storage.saveToHistory(quoteData);
-    if (!isConfigured()) return true;
+    if (!isConfigured()) return false;
     try {
       await sbFetch('kmf_history', {
         method: 'POST',
         headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-        body: {
-          quote_no: quoteNo,
-          payload: payload,
-          saved_at: payload.savedAt,
-        },
+        body: { quote_no: quoteNo, payload: payload, saved_at: payload.savedAt },
       });
       await trimHistory(30);
       return true;
@@ -217,7 +219,7 @@ const SerialSync = (function () {
           if (!p.savedAt && rows[0].saved_at) p.savedAt = rows[0].saved_at;
           return p;
         }
-      } catch (e) { /* fall through */ }
+      } catch (e) {}
     }
     return Storage.getHistoryEntry(quoteNo);
   }
@@ -227,12 +229,10 @@ const SerialSync = (function () {
     if (!isConfigured()) return true;
     try {
       await sbFetch('kmf_history?quote_no=eq.' + encodeURIComponent(quoteNo), {
-        method: 'DELETE',
-        headers: { 'Prefer': 'return=minimal' },
+        method: 'DELETE', headers: { 'Prefer': 'return=minimal' },
       });
       return true;
     } catch (e) {
-      console.warn('deleteHistory', e);
       return false;
     }
   }
@@ -243,13 +243,10 @@ const SerialSync = (function () {
       if (!Array.isArray(rows) || rows.length <= keep) return;
       for (var i = keep; i < rows.length; i++) {
         await sbFetch('kmf_history?quote_no=eq.' + encodeURIComponent(rows[i].quote_no), {
-          method: 'DELETE',
-          headers: { 'Prefer': 'return=minimal' },
+          method: 'DELETE', headers: { 'Prefer': 'return=minimal' },
         });
       }
-    } catch (e) {
-      console.warn('trimHistory', e);
-    }
+    } catch (e) {}
   }
 
   async function listCustomers() {
@@ -294,18 +291,19 @@ const SerialSync = (function () {
     if (!isConfigured()) return true;
     try {
       await sbFetch('kmf_customers?name_key=eq.' + encodeURIComponent(key), {
-        method: 'DELETE',
-        headers: { 'Prefer': 'return=minimal' },
+        method: 'DELETE', headers: { 'Prefer': 'return=minimal' },
       });
       return true;
     } catch (e) {
-      console.warn('deleteCustomer', e);
       return false;
     }
   }
 
   return {
     isConfigured: isConfigured,
+    testConnection: testConnection,
+    getStatus: getStatus,
+    getLastError: getLastError,
     peekNext: peekNext,
     reserveNext: reserveNext,
     peekInvoiceNext: peekInvoiceNext,

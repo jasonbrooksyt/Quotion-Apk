@@ -655,18 +655,26 @@ const QGenApp = (function () {
       try {
         const docType = (document.getElementById('docType') || {}).value || 'quotation';
         const qn = document.getElementById('quoteNo');
+        if (typeof SerialSync === 'undefined' || !SerialSync.isConfigured()) {
+          toast('Cloud sync off — serial-config.js mein URL/KEY set karo (dono phones pe same)');
+          return;
+        }
         if (docType === 'invoice') {
-          if (typeof SerialSync !== 'undefined' && SerialSync.isConfigured()) {
-            const reserved = await SerialSync.reserveInvoiceNext();
-            if (qn) qn.value = reserved.quoteNo;
-            if (reserved.source === 'cloud') toast('Invoice serial synced: ' + reserved.quoteNo);
-          } else if (qn && !/^GST\/\d{2}-\d{2}\/\d+/i.test(qn.value || '')) {
-            qn.value = Utils.nextInvoiceNumber(localStorage.getItem('qgen.lastInvoiceNo.v1'));
+          const reserved = await SerialSync.reserveInvoiceNext();
+          if (reserved.source !== 'cloud' || !reserved.quoteNo) {
+            toast('Invoice serial cloud se nahi mila: ' + (reserved.error || 'retry'));
+            return;
           }
-        } else if (typeof SerialSync !== 'undefined') {
-          const reserved = await SerialSync.reserveNext();
           if (qn) qn.value = reserved.quoteNo;
-          if (reserved.source === 'cloud') toast('Serial synced: ' + reserved.quoteNo);
+          toast('Invoice # ' + reserved.quoteNo);
+        } else {
+          const reserved = await SerialSync.reserveNext();
+          if (reserved.source !== 'cloud' || !reserved.quoteNo) {
+            toast('Quotation serial cloud se nahi mila: ' + (reserved.error || 'retry'));
+            return;
+          }
+          if (qn) qn.value = reserved.quoteNo;
+          toast('Quotation # ' + reserved.quoteNo);
         }
         const data = collectData();
         data.meta.docType = docType;
@@ -692,13 +700,30 @@ const QGenApp = (function () {
       const btn = document.getElementById('genDocxBtn');
       btn.disabled = true;
       try {
-        if (typeof SerialSync !== 'undefined') {
-          const reserved = await SerialSync.reserveNext();
+        if (typeof SerialSync === 'undefined' || !SerialSync.isConfigured()) {
+          toast('Cloud sync off — serial-config.js check karo');
+          return;
+        }
+        const docType2 = (document.getElementById('docType') || {}).value || 'quotation';
+        if (docType2 === 'invoice') {
+          const reserved = await SerialSync.reserveInvoiceNext();
+          if (reserved.source !== 'cloud' || !reserved.quoteNo) {
+            toast('Serial fail: ' + (reserved.error || 'retry'));
+            return;
+          }
           document.getElementById('quoteNo').value = reserved.quoteNo;
-          if (reserved.source === 'cloud') toast('Serial synced: ' + reserved.quoteNo);
+        } else {
+          const reserved = await SerialSync.reserveNext();
+          if (reserved.source !== 'cloud' || !reserved.quoteNo) {
+            toast('Serial fail: ' + (reserved.error || 'retry'));
+            return;
+          }
+          document.getElementById('quoteNo').value = reserved.quoteNo;
         }
         const data = collectData();
-        Storage.setLastQuoteNo(data.meta.quoteNo);
+        data.meta.docType = docType2;
+        if (docType2 === 'invoice') localStorage.setItem('qgen.lastInvoiceNo.v1', data.meta.quoteNo);
+        else Storage.setLastQuoteNo(data.meta.quoteNo);
         if (typeof SerialSync !== 'undefined') await SerialSync.saveHistory(data);
         else Storage.saveToHistory(data);
         await refreshHistoryList();
@@ -761,34 +786,62 @@ const QGenApp = (function () {
     });
   }
 
+  async function updateCloudStatus() {
+    const el = document.getElementById('cloudStatus');
+    if (!el || typeof SerialSync === 'undefined') return;
+    if (!SerialSync.isConfigured()) {
+      el.className = 'cloud-status cloud-status--err';
+      el.textContent = '⚠ Cloud OFF — serial-config.js mein SUPABASE_URL + ANON_KEY set karo (dono phones same file).';
+      el.classList.remove('hidden');
+      return;
+    }
+    const res = await SerialSync.testConnection();
+    if (res.ok) {
+      el.className = 'cloud-status cloud-status--ok';
+      el.textContent = '☁ Cloud connected — serial, customers, history dono phones pe sync.';
+      el.classList.remove('hidden');
+      setTimeout(() => { el.classList.add('hidden'); }, 5000);
+    } else {
+      el.className = 'cloud-status cloud-status--err';
+      el.textContent = '⚠ Cloud error: ' + res.message;
+      el.classList.remove('hidden');
+    }
+  }
+
   function initApp() {
     if (!Storage.isAvailable()) {
       const w = document.getElementById('storageWarning');
       if (w) w.classList.remove('hidden');
-    }
-    if (typeof SerialSync !== 'undefined' && !SerialSync.isConfigured()) {
-      const w = document.getElementById('storageWarning');
-      if (w) {
-        w.textContent = '⚠ Supabase URL/KEY serial-config.js mein set nahi hai — shared serial/history off hai.';
-        w.classList.remove('hidden');
-      }
     }
     wireStaticControls();
     wireCustomerPicker();
     loadDraftIntoForm();
     refreshHistoryList();
     recalcAll();
+    updateCloudStatus();
 
-    // Keep customers + recent docs in sync across phones (poll + on focus)
     async function softRefreshCloud() {
       try {
         await refreshCustomerPicker();
         await refreshHistoryList();
+        // refresh serial preview if user has not typed
+        const qn = document.getElementById('quoteNo');
+        const dt = (document.getElementById('docType') || {}).value || 'quotation';
+        if (qn && !qn.dataset.userEdited && typeof SerialSync !== 'undefined' && SerialSync.isConfigured()) {
+          if (dt === 'invoice') {
+            SerialSync.peekInvoiceNext().then((no) => { if (!qn.dataset.userEdited) qn.value = no; }).catch(() => {});
+          } else {
+            SerialSync.peekNext().then((no) => { if (!qn.dataset.userEdited) qn.value = no; }).catch(() => {});
+          }
+        }
       } catch (e) { /* ignore */ }
     }
-    setInterval(softRefreshCloud, 20000);
+    setInterval(softRefreshCloud, 5000);
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') softRefreshCloud();
+      if (document.visibilityState === 'visible') {
+        softRefreshCloud();
+        updateCloudStatus();
+      }
     });
   }
 

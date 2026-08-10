@@ -363,3 +363,10 @@ textarea{resize:vertical;}
   font-weight:600;cursor:pointer;font-family:inherit;
 }
 .header-logout:active{background:rgba(255,255,255,.25);}
+
+.cloud-status{
+  margin:8px 12px 0;padding:10px 12px;border-radius:10px;font-size:13px;font-weight:600;
+}
+.cloud-status--ok{background:#e8f7ee;color:#0d6b35;border:1px solid #b7e4c7;}
+.cloud-status--err{background:#fde8e8;color:#9b1c1c;border:1px solid #f5c2c2;}
+.cloud-status--warn{background:#fff6e5;color:#8a5a00;border:1px solid #f0d9a8;}
