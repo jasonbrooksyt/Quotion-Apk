@@ -50,6 +50,29 @@
   </div>
   <div id="cloudStatus" class="cloud-status hidden"></div>
 
+  <!-- DOCUMENT TYPE — primary action -->
+  <section class="doc-type-hero" id="docTypeHero">
+    <p class="doc-type-hero__label">Select document type</p>
+    <div class="doc-type-switch" role="group" aria-label="Document type">
+      <button type="button" class="doc-type-opt doc-type-opt--active" data-type="quotation" id="docTypeQuotation">
+        <span class="doc-type-opt__icon">Q</span>
+        <span class="doc-type-opt__text">
+          <strong>Quotation</strong>
+          <small>Offer / estimate</small>
+        </span>
+      </button>
+      <button type="button" class="doc-type-opt" data-type="invoice" id="docTypeInvoice">
+        <span class="doc-type-opt__icon">₹</span>
+        <span class="doc-type-opt__text">
+          <strong>Tax Invoice</strong>
+          <small>GST bill + UPI QR</small>
+        </span>
+      </button>
+    </div>
+    <input type="hidden" id="docType" value="quotation" />
+    <p class="doc-type-hero__hint" id="docTypeHeroHint">Quotation mode — offer number QT-…</p>
+  </section>
+
   <!-- CUSTOMER DETAILS -->
   <section class="card">
     <h2 class="card__title">Customer Details</h2>
@@ -82,12 +105,6 @@
   <!-- DOC META -->
   <section class="card">
     <h2 class="card__title">Document Details</h2>
-    <label>Document Type
-      <select id="docType">
-        <option value="quotation" selected>Quotation</option>
-        <option value="invoice">Tax Invoice</option>
-      </select>
-    </label>
     <div class="grid2">
       <label id="docNoLabel">Quotation No.
         <input type="text" id="quoteNo" />

@@ -258,12 +258,21 @@ const QGenApp = (function () {
     document.getElementById('gstType').value = data.meta?.gstType || 'CGST_SGST';
     document.getElementById('currency').value = data.meta?.currency || 'INR';
     const dt = document.getElementById('docType');
-    if (dt) dt.value = data.meta?.docType || 'quotation';
+    const dtype = data.meta?.docType || 'quotation';
+    if (dt) dt.value = dtype;
+    document.querySelectorAll('.doc-type-opt').forEach((btn) => {
+      btn.classList.toggle('doc-type-opt--active', btn.dataset.type === dtype);
+    });
+    const hero = document.getElementById('docTypeHero');
+    if (hero) {
+      hero.classList.toggle('doc-type-hero--invoice', dtype === 'invoice');
+      hero.classList.toggle('doc-type-hero--quotation', dtype === 'quotation');
+    }
     const poN = document.getElementById('poNumber');
     if (poN) poN.value = data.meta?.poNumber || '';
     const poD = document.getElementById('poDate');
     if (poD) poD.value = data.meta?.poDate || '';
-    if (typeof syncDocTypeUI === 'function') syncDocTypeUI();
+    if (typeof window.syncDocTypeUI === 'function') window.syncDocTypeUI();
 
     const termsEl = document.getElementById('termsText');
     if (termsEl) {
@@ -579,14 +588,39 @@ const QGenApp = (function () {
       }
     };
 
+    function setDocType(type) {
+      const hidden = document.getElementById('docType');
+      if (hidden) hidden.value = type;
+      document.querySelectorAll('.doc-type-opt').forEach((btn) => {
+        btn.classList.toggle('doc-type-opt--active', btn.dataset.type === type);
+      });
+      const hero = document.getElementById('docTypeHero');
+      if (hero) {
+        hero.classList.toggle('doc-type-hero--invoice', type === 'invoice');
+        hero.classList.toggle('doc-type-hero--quotation', type === 'quotation');
+      }
+      const heroHint = document.getElementById('docTypeHeroHint');
+      if (heroHint) {
+        heroHint.textContent = type === 'invoice'
+          ? 'Tax Invoice mode — GST/… number, bank + UPI QR on PDF'
+          : 'Quotation mode — QT-… number, terms on PDF';
+      }
+      const qnEl = document.getElementById('quoteNo');
+      if (qnEl) delete qnEl.dataset.userEdited;
+      window.syncDocTypeUI(true);
+      autosave();
+    }
+
+    document.querySelectorAll('.doc-type-opt').forEach((btn) => {
+      btn.addEventListener('click', () => setDocType(btn.dataset.type));
+    });
+
+    // keep select/hidden in sync when loading draft
     const docTypeEl = document.getElementById('docType');
     if (docTypeEl) {
-      docTypeEl.addEventListener('change', () => {
-        const qnEl = document.getElementById('quoteNo');
-        if (qnEl) delete qnEl.dataset.userEdited;
-        window.syncDocTypeUI(true);
-        autosave();
-      });
+      const initial = docTypeEl.value || 'quotation';
+      setDocType(initial);
+    } else {
       window.syncDocTypeUI(true);
     }
     document.getElementById('addItemBtn').addEventListener('click', () => {
