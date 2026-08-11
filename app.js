@@ -588,12 +588,18 @@ const QGenApp = (function () {
       }
     };
 
-    function setDocType(type) {
+    function setDocType(type, opts) {
+      opts = opts || {};
+      type = (type === 'invoice') ? 'invoice' : 'quotation';
       const hidden = document.getElementById('docType');
       if (hidden) hidden.value = type;
+
       document.querySelectorAll('.doc-type-opt').forEach((btn) => {
-        btn.classList.toggle('doc-type-opt--active', btn.dataset.type === type);
+        const on = btn.getAttribute('data-type') === type;
+        btn.classList.toggle('doc-type-opt--active', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
       });
+
       const hero = document.getElementById('docTypeHero');
       if (hero) {
         hero.classList.toggle('doc-type-hero--invoice', type === 'invoice');
@@ -605,24 +611,31 @@ const QGenApp = (function () {
           ? 'Tax Invoice mode — GST/… number, bank + UPI QR on PDF'
           : 'Quotation mode — QT-… number, terms on PDF';
       }
-      const qnEl = document.getElementById('quoteNo');
-      if (qnEl) delete qnEl.dataset.userEdited;
-      window.syncDocTypeUI(true);
-      autosave();
+
+      if (!opts.skipNumber) {
+        const qnEl = document.getElementById('quoteNo');
+        if (qnEl) delete qnEl.dataset.userEdited;
+        if (typeof window.syncDocTypeUI === 'function') window.syncDocTypeUI(true);
+      }
+      if (!opts.silent) autosave();
+    }
+    window.setDocType = setDocType;
+
+    // Event delegation — works even if inner spans are clicked
+    const heroEl = document.getElementById('docTypeHero');
+    if (heroEl) {
+      heroEl.addEventListener('click', (e) => {
+        const btn = e.target.closest('.doc-type-opt');
+        if (!btn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setDocType(btn.getAttribute('data-type'));
+      });
     }
 
-    document.querySelectorAll('.doc-type-opt').forEach((btn) => {
-      btn.addEventListener('click', () => setDocType(btn.dataset.type));
-    });
-
-    // keep select/hidden in sync when loading draft
     const docTypeEl = document.getElementById('docType');
-    if (docTypeEl) {
-      const initial = docTypeEl.value || 'quotation';
-      setDocType(initial);
-    } else {
-      window.syncDocTypeUI(true);
-    }
+    const initial = (docTypeEl && docTypeEl.value) ? docTypeEl.value : 'quotation';
+    setDocType(initial, { silent: true });
     document.getElementById('addItemBtn').addEventListener('click', () => {
       addItem();
       recalcAll();
@@ -638,21 +651,38 @@ const QGenApp = (function () {
       }
     });
 
-    document.getElementById('clearBtn').addEventListener('click', () => {
-      if (!confirm('Start a new Quotation / Invoice? Current form will be cleared.')) return;
+    function clearForm(keepDocType) {
+      const keepType = keepDocType
+        ? ((document.getElementById('docType') || {}).value || 'quotation')
+        : 'quotation';
       Storage.clearDraft();
       itemsWrap.innerHTML = '';
       document.querySelectorAll('.card input, .card textarea')
         .forEach((el) => { if (el.type !== 'date') el.value = ''; });
-      document.getElementById('quoteDate').value = Utils.todayISO();
+      const dateEl = document.getElementById('quoteDate');
+      if (dateEl) dateEl.value = Utils.todayISO();
       const termsEl = document.getElementById('termsText');
       if (termsEl) termsEl.value = DEFAULT_TERMS || '';
+      const poN = document.getElementById('poNumber');
+      if (poN) poN.value = '';
+      const poD = document.getElementById('poDate');
+      if (poD) poD.value = '';
       addItem();
       const qnEl = document.getElementById('quoteNo');
       if (qnEl) delete qnEl.dataset.userEdited;
-      if (typeof window.syncDocTypeUI === 'function') window.syncDocTypeUI(true);
-      else document.getElementById('quoteNo').value = Utils.nextQuotationNumber(Storage.getLastQuoteNo());
+      if (typeof window.setDocType === 'function') {
+        window.setDocType(keepType, { silent: true });
+      } else if (typeof window.syncDocTypeUI === 'function') {
+        window.syncDocTypeUI(true);
+      }
       recalcAll();
+      autosave();
+    }
+    window.clearForm = clearForm;
+
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      if (!confirm('Start a new Quotation / Invoice? Current form will be cleared.')) return;
+      clearForm(false);
     });
 
     document.getElementById('genPdfBtn').addEventListener('click', async () => {
@@ -697,6 +727,11 @@ const QGenApp = (function () {
         else Storage.saveToHistory(data);
         await refreshHistoryList();
         await PdfExport.generate(data);
+        // Auto-clear form after successful PDF (keep same doc type)
+        if (typeof window.clearForm === 'function') {
+          window.clearForm(true);
+          toast('PDF ready — form cleared for next entry');
+        }
       } finally {
         btn.disabled = false;
       }
