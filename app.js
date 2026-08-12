@@ -545,7 +545,7 @@ const QGenApp = (function () {
       const isInv = type === 'invoice';
 
       const poRow = document.getElementById('poRow');
-      if (poRow) poRow.style.display = isInv ? 'grid' : 'none';
+      if (poRow) poRow.style.display = isInv ? 'block' : 'none';
 
       const termsCard = document.getElementById('termsCard');
       if (termsCard) termsCard.style.display = isInv ? 'none' : '';

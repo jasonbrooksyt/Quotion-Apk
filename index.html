@@ -52,7 +52,7 @@
 
   <!-- DOCUMENT TYPE — primary action -->
   <section class="doc-type-hero" id="docTypeHero">
-    <p class="doc-type-hero__label">Select document type</p>
+    <p class="doc-type-hero__label">Document type</p>
     <div class="doc-type-switch" role="group" aria-label="Document type">
       <button type="button" class="doc-type-opt doc-type-opt--active" data-type="quotation" id="docTypeQuotation">
         <span class="doc-type-opt__icon">Q</span>
@@ -113,14 +113,6 @@
         <input type="date" id="quoteDate" />
       </label>
     </div>
-    <div class="grid2" id="poRow" style="display:none">
-      <label>Purchase Order No.
-        <input type="text" id="poNumber" placeholder="e.g. 4500494207" />
-      </label>
-      <label>PO Date
-        <input type="date" id="poDate" />
-      </label>
-    </div>
     <div class="grid2">
       <label>GST Type
         <select id="gstType">
@@ -135,9 +127,25 @@
         </select>
       </label>
     </div>
+  </section>
+
+  <!-- SUBJECT + PO -->
+  <section class="card card--ref" id="refSection">
+    <h2 class="card__title">Subject &amp; Purchase Order</h2>
     <label>Subject / Description
       <input type="text" id="subject" placeholder="e.g. Quotation / Invoice for SS Fabrication Work" />
     </label>
+    <div class="po-box" id="poRow" style="display:none">
+      <p class="po-box__label">Purchase Order</p>
+      <div class="grid2">
+        <label>PO Number
+          <input type="text" id="poNumber" placeholder="e.g. 4500494207" />
+        </label>
+        <label>PO Date
+          <input type="date" id="poDate" />
+        </label>
+      </div>
+    </div>
   </section>
 
   <!-- ITEMS -->

@@ -519,24 +519,24 @@ const PdfExport = (function () {
     const mainGst = gstRates.length ? gstRates[0] : 18;
     const halfGst = Utils.round2(mainGst / 2);
 
-    // Proportions closer to reference: bank | QR | totals
-    const leftW = CONTENT_W * 0.38;
-    const midW = CONTENT_W * 0.28;
+    // Bank wider, QR tighter — less empty gap around QR
+    const leftW = CONTENT_W * 0.44;
+    const midW = CONTENT_W * 0.22;
     const rightW = CONTENT_W - leftW - midW;
-    const boxH = 46;
+    const boxH = 42;
     const boxTop = y;
 
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.3);
 
-    // Bank details (left)
+    // Bank details (left) — slightly larger bold text, fill the box
     doc.rect(MARGIN, boxTop, leftW, boxH);
     doc.setFont(undefined, 'bold');
-    doc.setFontSize(9);
-    doc.text('Bank Details', MARGIN + 2.5, boxTop + 5.5);
-    doc.setFont(undefined, 'normal');
-    doc.setFontSize(8);
-    let ly = boxTop + 11;
+    doc.setFontSize(9.5);
+    doc.text('Bank Details', MARGIN + 2.5, boxTop + 6);
+    doc.setFont(undefined, 'bold');
+    doc.setFontSize(8.5);
+    let ly = boxTop + 12.5;
     [
       'Bank Name :- ' + (bank.name || ''),
       'Account No. ' + (bank.accountNo || ''),
@@ -544,19 +544,19 @@ const PdfExport = (function () {
       'UPI :- ' + (bank.upi || ''),
     ].forEach((line) => {
       doc.text(line, MARGIN + 2.5, ly);
-      ly += 5;
+      ly += 5.5;
     });
 
-    // QR middle — larger
+    // QR middle — smaller box, QR fills it with little gap
     doc.rect(MARGIN + leftW, boxTop, midW, boxH);
     doc.setFont(undefined, 'bold');
-    doc.setFontSize(8);
-    doc.text('Scan for Pay', MARGIN + leftW + midW / 2, boxTop + 5, { align: 'center' });
+    doc.setFontSize(7);
+    doc.text('Scan for Pay', MARGIN + leftW + midW / 2, boxTop + 4.2, { align: 'center' });
     const upiUri = Utils.buildUpiUri(t.finalAmount, data.meta.quoteNo);
     const qrData = await loadQrDataUrl(upiUri);
-    const qSize = 34;
+    const qSize = Math.min(midW - 4, boxH - 8);
     const qx = MARGIN + leftW + (midW - qSize) / 2;
-    const qy = boxTop + 8;
+    const qy = boxTop + 5.5;
     if (qrData) {
       try {
         doc.addImage(qrData, 'PNG', qx, qy, qSize, qSize);
