@@ -248,7 +248,9 @@ const PdfExport = (function () {
     return x;
   }
 
-  function drawTableHeader(doc, y, cols) {
+  function drawTableHeader(doc, y, cols, opts) {
+    opts = opts || {};
+    const centerHeaderKeys = opts.centerHeaderKeys || null; // Set of keys to force center in header only
     const headH = 10;
     doc.setFillColor(235, 238, 243);
     doc.setDrawColor(0, 0, 0);
@@ -260,11 +262,12 @@ const PdfExport = (function () {
     cols.forEach((c, i) => {
       const x = colX(cols, i);
       doc.rect(x, y, c.w, headH);
-      const tx = c.align === 'center' ? x + c.w / 2 : c.align === 'right' ? x + c.w - 1.5 : x + 1.5;
+      const headAlign = (centerHeaderKeys && centerHeaderKeys.indexOf(c.key) >= 0) ? 'center' : c.align;
+      const tx = headAlign === 'center' ? x + c.w / 2 : headAlign === 'right' ? x + c.w - 1.5 : x + 1.5;
       const lines = String(c.label).split('\n');
       const startY = y + (headH - lines.length * 3.2) / 2 + 2.5;
       lines.forEach((ln, li) => {
-        doc.text(ln, tx, startY + li * 3.2, { align: c.align === 'left' ? 'left' : c.align });
+        doc.text(ln, tx, startY + li * 3.2, { align: headAlign === 'left' ? 'left' : headAlign });
       });
     });
     doc.setFont(undefined, 'normal');
@@ -275,7 +278,10 @@ const PdfExport = (function () {
     const isInvoice = (data.meta && data.meta.docType === 'invoice') || /^GST\//i.test(String((data.meta && data.meta.quoteNo) || ''));
     const cols = getCols(isInvoice);
     doc.setFontSize(8);
-    y = drawTableHeader(doc, y, cols);
+    const headerOpts = isInvoice
+      ? { centerHeaderKeys: ['desc', 'rate', 'total'] }
+      : {};
+    y = drawTableHeader(doc, y, cols, headerOpts);
 
     const items = data.totals.computed || [];
     const n = Math.max(items.length, 1);
@@ -291,7 +297,7 @@ const PdfExport = (function () {
       if (y + rowH > PAGE_H - MARGIN - 20 && !isInvoice) {
         doc.addPage();
         y = MARGIN;
-        y = drawTableHeader(doc, y, cols);
+        y = drawTableHeader(doc, y, cols, headerOpts);
       }
 
       const qtyStr = isInvoice
@@ -527,9 +533,12 @@ const PdfExport = (function () {
     const boxTop = y;
 
     doc.setDrawColor(0, 0, 0);
-    doc.setLineWidth(0.3);
+    doc.setLineWidth(0.35);
 
-    // Bank details (left) — slightly larger bold text, fill the box
+    // One continuous top line across bank | QR | totals (matches items table bottom)
+    doc.line(MARGIN, boxTop, MARGIN + CONTENT_W, boxTop);
+
+    // Bank details (left)
     doc.rect(MARGIN, boxTop, leftW, boxH);
     doc.setFont(undefined, 'bold');
     doc.setFontSize(9.5);
@@ -602,7 +611,7 @@ const PdfExport = (function () {
     y = boxTop + boxH;
 
     // Amount in Words — reference style: label cell + words cell (full width bar)
-    const wordsH = 11;
+    const wordsH = 12;
     const labelW = CONTENT_W * 0.28;
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.3);
@@ -611,17 +620,16 @@ const PdfExport = (function () {
     doc.setFillColor(210, 228, 245);
     doc.rect(MARGIN + labelW, y, CONTENT_W - labelW, wordsH, 'FD');
     doc.setFont(undefined, 'bold');
-    doc.setFontSize(9);
-    doc.text('Amount in Words :-', MARGIN + labelW / 2, y + 7, { align: 'center' });
+    doc.setFontSize(10);
+    doc.text('Amount in Words :-', MARGIN + labelW / 2, y + 7.2, { align: 'center' });
     const currencyLabel = data.meta.currency === 'USD' ? 'US Dollars' : 'Rupees';
     let wordsText = Utils.amountInWords(t.finalAmount, currencyLabel);
-    // Match reference "INR … Rupees Only"
     if (data.meta.currency !== 'USD' && !/^INR/i.test(wordsText)) {
       wordsText = 'INR ' + wordsText;
     }
     doc.setFont(undefined, 'bold');
-    doc.setFontSize(8.5);
-    doc.text(wordsText, MARGIN + labelW + 3, y + 7);
+    doc.setFontSize(10);
+    doc.text(wordsText, MARGIN + labelW + 3, y + 7.2);
     y += wordsH;
 
     // Signature strip
