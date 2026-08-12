@@ -698,21 +698,28 @@ const QGenApp = (function () {
           toast('Cloud sync off — serial-config.js mein URL/KEY set karo (dono phones pe same)');
           return;
         }
+        const preferred = (qn && qn.dataset.userEdited === '1') ? (qn.value || '').trim() : '';
         if (docType === 'invoice') {
-          const reserved = await SerialSync.reserveInvoiceNext();
+          const reserved = await SerialSync.reserveInvoiceNext(preferred);
           if (reserved.source !== 'cloud' || !reserved.quoteNo) {
             toast('Invoice serial cloud se nahi mila: ' + (reserved.error || 'retry'));
             return;
           }
-          if (qn) qn.value = reserved.quoteNo;
+          if (qn) {
+            qn.value = reserved.quoteNo;
+            delete qn.dataset.userEdited;
+          }
           toast('Invoice # ' + reserved.quoteNo);
         } else {
-          const reserved = await SerialSync.reserveNext();
+          const reserved = await SerialSync.reserveNext(preferred);
           if (reserved.source !== 'cloud' || !reserved.quoteNo) {
             toast('Quotation serial cloud se nahi mila: ' + (reserved.error || 'retry'));
             return;
           }
-          if (qn) qn.value = reserved.quoteNo;
+          if (qn) {
+            qn.value = reserved.quoteNo;
+            delete qn.dataset.userEdited;
+          }
           toast('Quotation # ' + reserved.quoteNo);
         }
         const data = collectData();

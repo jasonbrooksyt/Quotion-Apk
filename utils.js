@@ -107,7 +107,7 @@ const Utils = (function () {
     if (!m) return `QT-${year}-0001`;
     const [, lastYear, seq] = m;
     if (Number(lastYear) !== year) return `QT-${year}-0001`;
-    const next = String(Number(seq) + 1).padStart(4, '0');
+    const next = String(Number(seq) + 1).padStart(3, '0');
     return `QT-${year}-${next}`;
   }
 
@@ -150,7 +150,7 @@ const Utils = (function () {
     if (!lastNumber) return prefix + '0001';
     const m = String(lastNumber).match(/GST\/(\d{2}-\d{2})\/(\d+)/);
     if (!m || m[1] !== fy) return prefix + '0001';
-    const next = String(Number(m[2]) + 1).padStart(4, '0');
+    const next = String(Number(m[2]) + 1).padStart(3, '0');
     return prefix + next;
   }
 

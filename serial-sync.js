@@ -80,7 +80,7 @@ const SerialSync = (function () {
     return 'QT-' + new Date().getFullYear() + '-';
   }
   function formatNo(seq) {
-    return yearPrefix() + String(seq).padStart(4, '0');
+    return yearPrefix() + String(seq).padStart(3, '0');
   }
   function parseSeq(quoteNo) {
     if (!quoteNo) return 0;
@@ -97,7 +97,7 @@ const SerialSync = (function () {
     return Number(m[2]) || 0;
   }
   function formatInvNo(seq) {
-    return 'GST/' + Utils.financialYearLabel(new Date()) + '/' + String(seq).padStart(4, '0');
+    return 'GST/' + Utils.financialYearLabel(new Date()) + '/' + String(seq).padStart(3, '0');
   }
 
   async function peekNext() {
@@ -112,7 +112,7 @@ const SerialSync = (function () {
     }
   }
 
-  async function reserveNext() {
+  async function reserveNext(preferredNo) {
     if (!isConfigured()) {
       return { quoteNo: null, source: 'error', error: 'Supabase not configured' };
     }
@@ -120,14 +120,31 @@ const SerialSync = (function () {
       var rows = await sbFetch('kmf_counter?id=eq.1&select=last_seq,last_no');
       var row = rows && rows[0];
       var lastSeq = row && typeof row.last_seq === 'number' ? row.last_seq : 0;
-      var nextSeq = lastSeq + 1;
+      var preferredSeq = parseSeq(preferredNo);
+      // Manual number: use it if >= next; else next auto
+      var nextSeq;
+      if (preferredSeq > 0 && preferredSeq > lastSeq) {
+        nextSeq = preferredSeq;
+      } else if (preferredSeq > 0 && preferredSeq <= lastSeq) {
+        // already used / behind — still allow exact if user forced, but advance cloud to at least this
+        nextSeq = preferredSeq;
+        if (preferredSeq < lastSeq) {
+          // keep cloud lastSeq higher; document uses preferred
+          var quoteNoEarly = formatNo(preferredSeq);
+          Storage.setLastQuoteNo(formatNo(Math.max(lastSeq, preferredSeq)));
+          return { quoteNo: quoteNoEarly, source: 'cloud' };
+        }
+      } else {
+        nextSeq = lastSeq + 1;
+      }
       var quoteNo = formatNo(nextSeq);
+      var cloudSeq = Math.max(lastSeq, nextSeq);
       await sbFetch('kmf_counter?id=eq.1', {
         method: 'PATCH',
         headers: { 'Prefer': 'return=minimal' },
-        body: { last_seq: nextSeq, last_no: quoteNo, updated_at: new Date().toISOString() },
+        body: { last_seq: cloudSeq, last_no: formatNo(cloudSeq), updated_at: new Date().toISOString() },
       });
-      Storage.setLastQuoteNo(quoteNo);
+      Storage.setLastQuoteNo(formatNo(cloudSeq));
       return { quoteNo: quoteNo, source: 'cloud' };
     } catch (e) {
       return { quoteNo: null, source: 'error', error: e.message || String(e) };
@@ -148,7 +165,7 @@ const SerialSync = (function () {
     }
   }
 
-  async function reserveInvoiceNext() {
+  async function reserveInvoiceNext(preferredNo) {
     if (!isConfigured()) {
       return { quoteNo: null, source: 'error', error: 'Supabase not configured' };
     }
@@ -156,14 +173,21 @@ const SerialSync = (function () {
       var rows = await sbFetch('kmf_counter?id=eq.1&select=last_inv_seq,last_inv_no');
       var row = rows && rows[0];
       var lastSeq = row && typeof row.last_inv_seq === 'number' ? row.last_inv_seq : 0;
-      var nextSeq = lastSeq + 1;
+      var preferredSeq = parseInvSeq(preferredNo);
+      var nextSeq;
+      if (preferredSeq > 0) {
+        nextSeq = preferredSeq;
+      } else {
+        nextSeq = lastSeq + 1;
+      }
       var invNo = formatInvNo(nextSeq);
+      var cloudSeq = Math.max(lastSeq, nextSeq);
       await sbFetch('kmf_counter?id=eq.1', {
         method: 'PATCH',
         headers: { 'Prefer': 'return=minimal' },
-        body: { last_inv_seq: nextSeq, last_inv_no: invNo, updated_at: new Date().toISOString() },
+        body: { last_inv_seq: cloudSeq, last_inv_no: formatInvNo(cloudSeq), updated_at: new Date().toISOString() },
       });
-      localStorage.setItem('qgen.lastInvoiceNo.v1', invNo);
+      localStorage.setItem('qgen.lastInvoiceNo.v1', formatInvNo(cloudSeq));
       return { quoteNo: invNo, source: 'cloud' };
     } catch (e) {
       return { quoteNo: null, source: 'error', error: e.message || String(e) };

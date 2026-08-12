@@ -525,9 +525,9 @@ const PdfExport = (function () {
     const mainGst = gstRates.length ? gstRates[0] : 18;
     const halfGst = Utils.round2(mainGst / 2);
 
-    // Bank wider, QR tighter — less empty gap around QR
-    const leftW = CONTENT_W * 0.44;
-    const midW = CONTENT_W * 0.22;
+    // One outer frame: Bank | QR | Totals — same top line for all
+    const leftW = CONTENT_W * 0.42;
+    const midW = CONTENT_W * 0.24;
     const rightW = CONTENT_W - leftW - midW;
     const boxH = 42;
     const boxTop = y;
@@ -535,11 +535,13 @@ const PdfExport = (function () {
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.35);
 
-    // One continuous top line across bank | QR | totals (matches items table bottom)
-    doc.line(MARGIN, boxTop, MARGIN + CONTENT_W, boxTop);
+    // Outer rectangle (single continuous border)
+    doc.rect(MARGIN, boxTop, CONTENT_W, boxH);
+    // Vertical dividers (full height — top & bottom share outer line)
+    doc.line(MARGIN + leftW, boxTop, MARGIN + leftW, boxTop + boxH);
+    doc.line(MARGIN + leftW + midW, boxTop, MARGIN + leftW + midW, boxTop + boxH);
 
     // Bank details (left)
-    doc.rect(MARGIN, boxTop, leftW, boxH);
     doc.setFont(undefined, 'bold');
     doc.setFontSize(9.5);
     doc.text('Bank Details', MARGIN + 2.5, boxTop + 6);
@@ -556,14 +558,13 @@ const PdfExport = (function () {
       ly += 5.5;
     });
 
-    // QR middle — smaller box, QR fills it with little gap
-    doc.rect(MARGIN + leftW, boxTop, midW, boxH);
+    // QR middle — fills cell under shared top line
     doc.setFont(undefined, 'bold');
     doc.setFontSize(7);
     doc.text('Scan for Pay', MARGIN + leftW + midW / 2, boxTop + 4.2, { align: 'center' });
     const upiUri = Utils.buildUpiUri(t.finalAmount, data.meta.quoteNo);
     const qrData = await loadQrDataUrl(upiUri);
-    const qSize = Math.min(midW - 4, boxH - 8);
+    const qSize = Math.min(midW - 5, boxH - 9);
     const qx = MARGIN + leftW + (midW - qSize) / 2;
     const qy = boxTop + 5.5;
     if (qrData) {
