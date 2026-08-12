@@ -121,28 +121,17 @@ const SerialSync = (function () {
       var row = rows && rows[0];
       var lastSeq = row && typeof row.last_seq === 'number' ? row.last_seq : 0;
       var preferredSeq = parseSeq(preferredNo);
-      // Manual number: use it if >= next; else next auto
-      var nextSeq;
-      if (preferredSeq > 0 && preferredSeq > lastSeq) {
-        nextSeq = preferredSeq;
-      } else if (preferredSeq > 0 && preferredSeq <= lastSeq) {
-        // already used / behind — still allow exact if user forced, but advance cloud to at least this
-        nextSeq = preferredSeq;
-        if (preferredSeq < lastSeq) {
-          // keep cloud lastSeq higher; document uses preferred
-          var quoteNoEarly = formatNo(preferredSeq);
-          Storage.setLastQuoteNo(formatNo(Math.max(lastSeq, preferredSeq)));
-          return { quoteNo: quoteNoEarly, source: 'cloud' };
-        }
-      } else {
-        nextSeq = lastSeq + 1;
-      }
+      var nextSeq = preferredSeq > 0 ? preferredSeq : (lastSeq + 1);
       var quoteNo = formatNo(nextSeq);
       var cloudSeq = Math.max(lastSeq, nextSeq);
       await sbFetch('kmf_counter?id=eq.1', {
         method: 'PATCH',
         headers: { 'Prefer': 'return=minimal' },
-        body: { last_seq: cloudSeq, last_no: formatNo(cloudSeq), updated_at: new Date().toISOString() },
+        body: {
+          last_seq: cloudSeq,
+          last_no: formatNo(cloudSeq),
+          updated_at: new Date().toISOString(),
+        },
       });
       Storage.setLastQuoteNo(formatNo(cloudSeq));
       return { quoteNo: quoteNo, source: 'cloud' };
@@ -174,18 +163,17 @@ const SerialSync = (function () {
       var row = rows && rows[0];
       var lastSeq = row && typeof row.last_inv_seq === 'number' ? row.last_inv_seq : 0;
       var preferredSeq = parseInvSeq(preferredNo);
-      var nextSeq;
-      if (preferredSeq > 0) {
-        nextSeq = preferredSeq;
-      } else {
-        nextSeq = lastSeq + 1;
-      }
+      var nextSeq = preferredSeq > 0 ? preferredSeq : (lastSeq + 1);
       var invNo = formatInvNo(nextSeq);
       var cloudSeq = Math.max(lastSeq, nextSeq);
       await sbFetch('kmf_counter?id=eq.1', {
         method: 'PATCH',
         headers: { 'Prefer': 'return=minimal' },
-        body: { last_inv_seq: cloudSeq, last_inv_no: formatInvNo(cloudSeq), updated_at: new Date().toISOString() },
+        body: {
+          last_inv_seq: cloudSeq,
+          last_inv_no: formatInvNo(cloudSeq),
+          updated_at: new Date().toISOString(),
+        },
       });
       localStorage.setItem('qgen.lastInvoiceNo.v1', formatInvNo(cloudSeq));
       return { quoteNo: invNo, source: 'cloud' };

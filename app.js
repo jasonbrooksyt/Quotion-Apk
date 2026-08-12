@@ -698,7 +698,7 @@ const QGenApp = (function () {
           toast('Cloud sync off — serial-config.js mein URL/KEY set karo (dono phones pe same)');
           return;
         }
-        const preferred = (qn && qn.dataset.userEdited === '1') ? (qn.value || '').trim() : '';
+        const preferred = (qn && qn.value) ? String(qn.value).trim() : '';
         if (docType === 'invoice') {
           const reserved = await SerialSync.reserveInvoiceNext(preferred);
           if (reserved.source !== 'cloud' || !reserved.quoteNo) {

@@ -22,8 +22,9 @@ const PdfExport = (function () {
     const invoiceBottomReserve = 88;
     y = drawItemsTable(doc, data, y, isInvoice ? invoiceBottomReserve : 55);
 
+    let bankTopY = null;
     if (isInvoice) {
-      // Item rows already fill down; only a thin gap before bottom block
+      bankTopY = y; // items bottom == bank top (shared line)
       y = await drawInvoiceBottom(doc, data, y);
     } else {
       const bottomH = estimateBottomHeight(data);
@@ -33,9 +34,14 @@ const PdfExport = (function () {
       y = drawTermsAndSignature(doc, data, y);
     }
 
+    // Continuous border around items only for invoice (bank has its own outer frame)
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.4);
-    doc.rect(MARGIN, bodyTop, CONTENT_W, y - bodyTop);
+    if (isInvoice && bankTopY != null) {
+      doc.rect(MARGIN, bodyTop, CONTENT_W, Math.max(0, bankTopY - bodyTop));
+    } else {
+      doc.rect(MARGIN, bodyTop, CONTENT_W, y - bodyTop);
+    }
 
     const prefix = isInvoice ? 'Invoice' : 'Quotation';
     const filename = prefix + '_' + (data.meta.quoteNo || 'draft').replace(/[^\w\/-]/g, '_') + '.pdf';
@@ -581,7 +587,7 @@ const PdfExport = (function () {
       doc.text('QR needs internet', MARGIN + leftW + midW / 2, boxTop + 24, { align: 'center' });
     }
 
-    // Totals right
+    // Totals right — internal lines only (outer frame already drawn; keeps QR top line clean)
     const tx = MARGIN + leftW + midW;
     const rowH = 9;
     const totalRows = [['Taxable Amount', Utils.fmtMoney(t.taxable)]];
@@ -593,17 +599,22 @@ const PdfExport = (function () {
     }
     let ry = boxTop;
     totalRows.forEach(([label, val]) => {
-      doc.rect(tx, ry, rightW, rowH);
       doc.setFont(undefined, 'bold');
       doc.setFontSize(8);
       doc.text(label, tx + 2, ry + rowH / 2 + 1.3);
       doc.setFont(undefined, 'normal');
       doc.text(String(val), tx + rightW - 2, ry + rowH / 2 + 1.3, { align: 'right' });
       ry += rowH;
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.25);
+      doc.line(tx, ry, tx + rightW, ry);
     });
     const gtH = boxH - (ry - boxTop);
     doc.setFillColor(220, 230, 245);
-    doc.rect(tx, ry, rightW, gtH, 'FD');
+    doc.rect(tx, ry, rightW, gtH, 'F');
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.25);
+    doc.line(tx, ry, tx + rightW, ry);
     doc.setFont(undefined, 'bold');
     doc.setFontSize(10);
     doc.text('Grand Total', tx + 2, ry + gtH / 2 + 1.4);
