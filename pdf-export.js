@@ -230,8 +230,8 @@ const PdfExport = (function () {
         { key: 'desc', label: 'Material/ Service Descriptions', w: 72, align: 'left' },
         { key: 'hsn', label: 'HSN/SAC\nCODE', w: 22, align: 'center' },
         { key: 'qty', label: 'Qty.', w: 16, align: 'center' },
-        { key: 'rate', label: 'Unit Rate', w: 22, align: 'right' },
-        { key: 'disc', label: 'Disc. %', w: 16, align: 'center' },
+        { key: 'rate', label: 'Unit Rate', w: 22, align: 'center' },
+        { key: 'disc', label: 'Disc.\nAmt', w: 16, align: 'center' },
         { key: 'total', label: 'Amount\n(in Rupees)', w: 26, align: 'right' },
       ];
     }
@@ -310,13 +310,17 @@ const PdfExport = (function () {
         ? (String(it.qty).padStart(2, '0') + ' ' + (it.unit || 'EA')).trim()
         : (it.qty + ' ' + (it.unit || '')).trim();
 
+      const gross = Utils.round2((Number(it.qty) || 0) * (Number(it.rate) || 0));
+      const discAmt = Utils.round2(gross * (Number(it.disc) || 0) / 100);
       const vals = {
         sno: String(idx + 1),
         desc: null,
         hsn: it.hsn || '',
         qty: qtyStr,
         rate: Utils.fmtMoney(it.rate),
-        disc: (it.disc ? Utils.fmtMoney(it.disc) : '0.00'),
+        disc: isInvoice
+          ? Utils.fmtMoney(discAmt)
+          : (it.disc ? (Utils.fmtMoney(it.disc) + '%') : '0%'),
         gst: it.gst + '%',
         gstAmt: Utils.fmtMoney(it.gstAmt),
         total: Utils.fmtMoney(it.taxable),
@@ -531,19 +535,19 @@ const PdfExport = (function () {
     const mainGst = gstRates.length ? gstRates[0] : 18;
     const halfGst = Utils.round2(mainGst / 2);
 
-    // One outer frame: Bank | QR | Totals — same top line for all
-    const leftW = CONTENT_W * 0.42;
-    const midW = CONTENT_W * 0.24;
-    const rightW = CONTENT_W - leftW - midW;
-    const boxH = 42;
+    // Align with item columns: Bank = Sr+Desc | QR = HSN+Qty | Totals = Rate+Disc+Amt
+    // Col widths: 12+72 | 22+16 | 22+16+26  = 84 | 38 | 64
+    const leftW = 84;
+    const midW = 38;
+    const rightW = CONTENT_W - leftW - midW; // 64
+    const boxH = 44;
     const boxTop = y;
 
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.35);
 
-    // Outer rectangle (single continuous border)
+    // Outer rectangle + verticals matching HSN left & Qty right from table above
     doc.rect(MARGIN, boxTop, CONTENT_W, boxH);
-    // Vertical dividers (full height — top & bottom share outer line)
     doc.line(MARGIN + leftW, boxTop, MARGIN + leftW, boxTop + boxH);
     doc.line(MARGIN + leftW + midW, boxTop, MARGIN + leftW + midW, boxTop + boxH);
 
@@ -564,15 +568,15 @@ const PdfExport = (function () {
       ly += 5.5;
     });
 
-    // QR middle — fills cell under shared top line
+    // QR — fill almost entire HSN+Qty width, minimal side gap
     doc.setFont(undefined, 'bold');
-    doc.setFontSize(7);
-    doc.text('Scan for Pay', MARGIN + leftW + midW / 2, boxTop + 4.2, { align: 'center' });
+    doc.setFontSize(6.5);
+    doc.text('Scan for Pay', MARGIN + leftW + midW / 2, boxTop + 3.8, { align: 'center' });
     const upiUri = Utils.buildUpiUri(t.finalAmount, data.meta.quoteNo);
     const qrData = await loadQrDataUrl(upiUri);
-    const qSize = Math.min(midW - 5, boxH - 9);
+    const qSize = Math.min(midW - 2, boxH - 7); // near-full cell
     const qx = MARGIN + leftW + (midW - qSize) / 2;
-    const qy = boxTop + 5.5;
+    const qy = boxTop + 4.5;
     if (qrData) {
       try {
         doc.addImage(qrData, 'PNG', qx, qy, qSize, qSize);
