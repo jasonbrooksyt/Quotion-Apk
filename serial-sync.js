@@ -121,9 +121,10 @@ const SerialSync = (function () {
       var row = rows && rows[0];
       var lastSeq = row && typeof row.last_seq === 'number' ? row.last_seq : 0;
       var preferredSeq = parseSeq(preferredNo);
+      // Manual number wins — next series continues from this (e.g. 170 used → next 171)
       var nextSeq = preferredSeq > 0 ? preferredSeq : (lastSeq + 1);
       var quoteNo = formatNo(nextSeq);
-      var cloudSeq = Math.max(lastSeq, nextSeq);
+      var cloudSeq = nextSeq;
       await sbFetch('kmf_counter?id=eq.1', {
         method: 'PATCH',
         headers: { 'Prefer': 'return=minimal' },
@@ -163,9 +164,10 @@ const SerialSync = (function () {
       var row = rows && rows[0];
       var lastSeq = row && typeof row.last_inv_seq === 'number' ? row.last_inv_seq : 0;
       var preferredSeq = parseInvSeq(preferredNo);
+      // Manual number wins — e.g. set 170 while counter was 177 → cloud=170, next=171
       var nextSeq = preferredSeq > 0 ? preferredSeq : (lastSeq + 1);
       var invNo = formatInvNo(nextSeq);
-      var cloudSeq = Math.max(lastSeq, nextSeq);
+      var cloudSeq = nextSeq;
       await sbFetch('kmf_counter?id=eq.1', {
         method: 'PATCH',
         headers: { 'Prefer': 'return=minimal' },

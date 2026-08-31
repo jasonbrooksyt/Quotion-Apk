@@ -10,7 +10,8 @@ const PdfExport = (function () {
   const CONTENT_W = PAGE_W - MARGIN * 2;
   const MIDX = MARGIN + CONTENT_W / 2;
 
-  async function generate(data) {
+
+  async function buildPdfDoc(data) {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const isInvoice = (data.meta && data.meta.docType === 'invoice') || (data.meta && /^GST\//i.test(String(data.meta.quoteNo || '')));
@@ -18,13 +19,12 @@ const PdfExport = (function () {
     let y = MARGIN;
     y = drawHeaderBox(doc, data, y);
     const bodyTop = y;
-    // Invoice: reserve space for bank+QR+totals+words+sign so item rows can stretch full page
     const invoiceBottomReserve = 88;
     y = drawItemsTable(doc, data, y, isInvoice ? invoiceBottomReserve : 55);
 
     let bankTopY = null;
     if (isInvoice) {
-      bankTopY = y; // items bottom == bank top (shared line)
+      bankTopY = y;
       y = await drawInvoiceBottom(doc, data, y);
     } else {
       const bottomH = estimateBottomHeight(data);
@@ -34,7 +34,6 @@ const PdfExport = (function () {
       y = drawTermsAndSignature(doc, data, y);
     }
 
-    // Continuous border around items only for invoice (bank has its own outer frame)
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.4);
     if (isInvoice && bankTopY != null) {
@@ -42,7 +41,11 @@ const PdfExport = (function () {
     } else {
       doc.rect(MARGIN, bodyTop, CONTENT_W, y - bodyTop);
     }
+    return { doc, isInvoice };
+  }
 
+  async function generate(data) {
+    const { doc, isInvoice } = await buildPdfDoc(data);
     const prefix = isInvoice ? 'Invoice' : 'Quotation';
     const filename = prefix + '_' + (data.meta.quoteNo || 'draft').replace(/[^\w\/-]/g, '_') + '.pdf';
     const blob = doc.output('blob');
@@ -50,12 +53,27 @@ const PdfExport = (function () {
       if (res.method === 'failed') {
         QGenApp.toast('PDF export failed — try again or check storage permission');
       } else if (res.method === 'cancelled') {
-        // user closed share sheet, no message needed
+        // user closed share sheet
       } else {
         QGenApp.toast(res.method === 'share' ? 'PDF ready to save/share' : 'PDF downloaded');
       }
     });
   }
+
+  async function preview(data) {
+    const { doc } = await buildPdfDoc(data);
+    const blob = doc.output('blob');
+    const url = URL.createObjectURL(blob);
+    const modal = document.getElementById('previewModal');
+    const frame = document.getElementById('previewFrame');
+    if (modal && frame) {
+      frame.src = url;
+      modal.classList.remove('hidden');
+    } else {
+      window.open(url, '_blank');
+    }
+  }
+
 
   function ensureSpace(doc, y, needed) {
     if (y + needed > PAGE_H - MARGIN) {
@@ -311,7 +329,7 @@ const PdfExport = (function () {
         : (it.qty + ' ' + (it.unit || '')).trim();
 
       const gross = Utils.round2((Number(it.qty) || 0) * (Number(it.rate) || 0));
-      const discAmt = Utils.round2(gross * (Number(it.disc) || 0) / 100);
+      const discAmt = (it.discAmt != null) ? Number(it.discAmt) : Utils.round2(gross * (Number(it.disc) || 0) / 100);
       const vals = {
         sno: String(idx + 1),
         desc: null,
@@ -670,6 +688,6 @@ const PdfExport = (function () {
     return sigBoxTop + sigBoxH;
   }
 
-  return { generate };
+  return { generate, preview, buildPdfDoc };
 })();
 

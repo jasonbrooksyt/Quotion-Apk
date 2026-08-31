@@ -17,7 +17,7 @@ const QGenApp = (function () {
       node.querySelector('[data-field="hsn"]').value = values.hsn || '';
       node.querySelector('[data-field="unit"]').value = values.unit || 'Each';
       node.querySelector('[data-field="qty"]').value = values.qty ?? 1;
-      node.querySelector('[data-field="rate"]').value = values.rate ?? 0;
+      node.querySelector('[data-field="rate"]').value = (values.rate != null && values.rate !== '') ? values.rate : '';
       node.querySelector('[data-field="disc"]').value = values.disc ?? 0;
       node.querySelector('[data-field="gst"]').value = values.gst ?? 18;
     }
@@ -85,11 +85,16 @@ const QGenApp = (function () {
   // ---------- Calculations ----------
 
   function computeItem(it) {
-    const gross = it.qty * it.rate;
-    const taxable = Utils.round2(gross - (gross * it.disc / 100));
-    const gstAmt = Utils.round2(taxable * it.gst / 100);
+    const qty = Number(it.qty) || 0;
+    const rate = Number(it.rate) || 0;
+    const disc = Number(it.disc) || 0;
+    const gst = Number(it.gst) || 0;
+    const gross = Utils.round2(qty * rate);
+    const discAmt = Utils.round2(gross * disc / 100);
+    const taxable = Utils.round2(gross - discAmt);
+    const gstAmt = Utils.round2(taxable * gst / 100);
     const lineTotal = Utils.round2(taxable + gstAmt);
-    return { ...it, taxable, gstAmt, lineTotal };
+    return { ...it, qty, rate, disc, gst, gross, discAmt, taxable, gstAmt, lineTotal };
   }
 
   function computeTotals(items, charges, gstType, overallDiscount) {
@@ -116,7 +121,21 @@ const QGenApp = (function () {
     Array.from(itemsWrap.children).forEach((row) => {
       const it = readRow(row);
       const c = computeItem(it);
-      row.querySelector('[data-field="lineTotal"]').textContent = Utils.fmtMoney(c.lineTotal);
+      const lt = row.querySelector('[data-field="lineTotal"]');
+      if (lt) lt.textContent = Utils.fmtMoney(c.lineTotal);
+      let discEl = row.querySelector('[data-field="discAmtShow"]');
+      if (!discEl) {
+        const wrap = row.querySelector('.item-row__amount');
+        if (wrap) {
+          discEl = document.createElement('span');
+          discEl.className = 'item-row__disc';
+          discEl.setAttribute('data-field', 'discAmtShow');
+          wrap.insertBefore(discEl, wrap.firstChild);
+        }
+      }
+      if (discEl) {
+        discEl.textContent = c.discAmt > 0 ? ('Disc ₹' + Utils.fmtMoney(c.discAmt) + ' · ') : '';
+      }
     });
 
     const items = readAllItems();
@@ -231,7 +250,7 @@ const QGenApp = (function () {
     items.forEach((it, i) => {
       if (!it.desc.trim()) errors.push(`Item ${i + 1}: description is required.`);
       if (!(it.qty > 0)) errors.push(`Item ${i + 1}: quantity must be greater than 0.`);
-      if (!(it.rate >= 0)) errors.push(`Item ${i + 1}: rate is required.`);
+      if (!(Number(it.rate) > 0)) errors.push(`Item ${i + 1}: rate is required.`);
     });
     return errors;
   }
@@ -422,9 +441,25 @@ const QGenApp = (function () {
 
   // ---------- Quotation history (edit a previously generated quotation) ----------
 
+  function isInvoiceEntry(entry) {
+    const dt = entry && entry.meta && entry.meta.docType;
+    if (dt === 'invoice') return true;
+    if (dt === 'quotation') return false;
+    const no = (entry && entry.meta && entry.meta.quoteNo) || '';
+    return /^GST\//i.test(String(no));
+  }
+
   async function refreshHistoryList() {
     const wrap = document.getElementById('historyList');
     if (!wrap) return;
+    const docType = (document.getElementById('docType') || {}).value || 'quotation';
+    const wantInvoice = docType === 'invoice';
+    const titleEl = document.getElementById('historyTitle');
+    if (titleEl) {
+      titleEl.textContent = wantInvoice
+        ? 'Recent Invoices (Edit last 3)'
+        : 'Recent Quotations (Edit last 3)';
+    }
     wrap.innerHTML = '<p class="hint">Loading…</p>';
     let entries = [];
     try {
@@ -434,10 +469,14 @@ const QGenApp = (function () {
     } catch (e) {
       entries = Storage.listHistory();
     }
+    // Only same document type (quotation vs invoice)
+    entries = (entries || []).filter((e) => isInvoiceEntry(e) === wantInvoice);
     const limit = (typeof HISTORY_EDIT_LIMIT === 'number') ? HISTORY_EDIT_LIMIT : 3;
-    entries = (entries || []).slice(0, limit);
+    entries = entries.slice(0, limit);
     if (!entries.length) {
-      wrap.innerHTML = '<p class="hint">Last 3 quotations yahan dikhenge — Edit se form load hoga.</p>';
+      wrap.innerHTML = wantInvoice
+        ? '<p class="hint">Last 3 invoices yahan dikhenge — Edit se form load hoga.</p>'
+        : '<p class="hint">Last 3 quotations yahan dikhenge — Edit se form load hoga.</p>';
       return;
     }
     wrap.innerHTML = entries.map((entry) => {
@@ -470,7 +509,7 @@ const QGenApp = (function () {
         } catch (e) {
           entry = Storage.getHistoryEntry(quoteNo);
         }
-        if (!entry) { toast('Could not find that quotation'); return; }
+        if (!entry) { toast('Could not find that entry'); return; }
         populateFormFromData(entry);
         recalcAll();
         autosave();
@@ -478,7 +517,7 @@ const QGenApp = (function () {
         toast('Loaded ' + quoteNo + ' for editing');
       });
       el.querySelector('[data-action="delete"]').addEventListener('click', async () => {
-        if (!confirm('Delete quotation ' + quoteNo + ' from history?')) return;
+        if (!confirm('Delete ' + quoteNo + ' from history?')) return;
         if (typeof SerialSync !== 'undefined') await SerialSync.deleteHistoryEntry(quoteNo);
         else Storage.deleteHistoryEntry(quoteNo);
         refreshHistoryList();
@@ -618,6 +657,8 @@ const QGenApp = (function () {
         if (typeof window.syncDocTypeUI === 'function') window.syncDocTypeUI(true);
       }
       if (!opts.silent) autosave();
+      // History list: only show same type (quotation / invoice)
+      refreshHistoryList();
     }
     window.setDocType = setDocType;
 
@@ -744,45 +785,45 @@ const QGenApp = (function () {
       }
     });
 
-    document.getElementById('genDocxBtn').addEventListener('click', async () => {
+    document.getElementById('previewPdfBtn').addEventListener('click', async () => {
       const errors = validate();
       if (errors.length) { showErrors(errors); return; }
       hideErrors();
-      const btn = document.getElementById('genDocxBtn');
+      const btn = document.getElementById('previewPdfBtn');
       btn.disabled = true;
       try {
-        if (typeof SerialSync === 'undefined' || !SerialSync.isConfigured()) {
-          toast('Cloud sync off — serial-config.js check karo');
-          return;
-        }
-        const docType2 = (document.getElementById('docType') || {}).value || 'quotation';
-        if (docType2 === 'invoice') {
-          const reserved = await SerialSync.reserveInvoiceNext();
-          if (reserved.source !== 'cloud' || !reserved.quoteNo) {
-            toast('Serial fail: ' + (reserved.error || 'retry'));
-            return;
-          }
-          document.getElementById('quoteNo').value = reserved.quoteNo;
-        } else {
-          const reserved = await SerialSync.reserveNext();
-          if (reserved.source !== 'cloud' || !reserved.quoteNo) {
-            toast('Serial fail: ' + (reserved.error || 'retry'));
-            return;
-          }
-          document.getElementById('quoteNo').value = reserved.quoteNo;
-        }
         const data = collectData();
-        data.meta.docType = docType2;
-        if (docType2 === 'invoice') localStorage.setItem('qgen.lastInvoiceNo.v1', data.meta.quoteNo);
-        else Storage.setLastQuoteNo(data.meta.quoteNo);
-        if (typeof SerialSync !== 'undefined') await SerialSync.saveHistory(data);
-        else Storage.saveToHistory(data);
-        await refreshHistoryList();
-        DocxExport.generate(data);
+        data.meta.docType = (document.getElementById('docType') || {}).value || 'quotation';
+        if (data.meta.docType === 'invoice') {
+          data.terms = { deliveryTime: '', paymentTerms: '', remarks: '', termsText: [] };
+        }
+        await PdfExport.preview(data);
+      } catch (e) {
+        console.error(e);
+        toast('Preview failed: ' + (e.message || e));
       } finally {
         btn.disabled = false;
       }
     });
+
+    const previewClose = document.getElementById('previewCloseBtn');
+    const previewModal = document.getElementById('previewModal');
+    if (previewClose && previewModal) {
+      previewClose.addEventListener('click', () => {
+        previewModal.classList.add('hidden');
+        const frame = document.getElementById('previewFrame');
+        if (frame) frame.src = '';
+      });
+      previewModal.addEventListener('click', (e) => {
+        if (e.target === previewModal) {
+          previewModal.classList.add('hidden');
+          const frame = document.getElementById('previewFrame');
+          if (frame) frame.src = '';
+        }
+      });
+    }
+
+
   }
 
   function isUnlocked() {
