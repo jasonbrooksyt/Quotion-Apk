@@ -145,6 +145,11 @@
           <input type="date" id="poDate" />
         </label>
       </div>
+      <div class="po-upload">
+        <input type="file" id="poFileInput" accept="application/pdf,image/*" class="hidden" />
+        <button type="button" class="btn btn--secondary" id="poUploadBtn">📄 Upload PO (auto-fill)</button>
+        <p class="hint" id="poUploadHint">PDF / photo se PO No, Date, items &amp; rate auto bharega. Customer (Bill To) khud select karo.</p>
+      </div>
     </div>
   </section>
 
@@ -309,6 +314,7 @@ Validity: - the offer is valid for period of 10 days from the date of the offer.
 <script src="docx-export.js"></script>
 <script src="serial-config.js"></script>
 <script src="serial-sync.js"></script>
+<script src="po-import.js"></script>
 <script src="app.js"></script>
 
 </div><!-- #appShell -->

@@ -826,6 +826,76 @@ const QGenApp = (function () {
       });
     }
 
+
+    // ---- PO Upload auto-fill (no Bill To / customer) ----
+    const poUploadBtn = document.getElementById('poUploadBtn');
+    const poFileInput = document.getElementById('poFileInput');
+    if (poUploadBtn && poFileInput) {
+      poUploadBtn.addEventListener('click', () => poFileInput.click());
+      poFileInput.addEventListener('change', async () => {
+        const file = poFileInput.files && poFileInput.files[0];
+        poFileInput.value = '';
+        if (!file) return;
+        if (typeof PoImport === 'undefined') {
+          toast('PO import module missing — po-import.js add karo');
+          return;
+        }
+        poUploadBtn.disabled = true;
+        poUploadBtn.textContent = 'Reading PO…';
+        const hint = document.getElementById('poUploadHint');
+        try {
+          toast('PO padh rahe hain…');
+          const parsed = await PoImport.importFile(file);
+          // PO No + Date
+          if (parsed.poNumber) {
+            const el = document.getElementById('poNumber');
+            if (el) el.value = parsed.poNumber;
+          }
+          if (parsed.poDate) {
+            const el = document.getElementById('poDate');
+            if (el) el.value = parsed.poDate;
+          }
+          if (parsed.subject) {
+            const el = document.getElementById('subject');
+            if (el && !el.value.trim()) el.value = parsed.subject;
+          }
+          // Items — replace rows (customer untouched)
+          if (parsed.items && parsed.items.length) {
+            itemsWrap.innerHTML = '';
+            parsed.items.forEach((it) => {
+              addItem({
+                desc: it.desc,
+                hsn: it.hsn || '',
+                unit: it.unit || 'Each',
+                qty: it.qty,
+                rate: it.rate,
+                disc: it.disc || 0,
+                gst: it.gst != null ? it.gst : 18,
+              });
+            });
+            renumberRows();
+            recalcAll();
+          }
+          autosave();
+          const n = (parsed.items || []).length;
+          const msg = 'PO import: '
+            + (parsed.poNumber ? ('No ' + parsed.poNumber) : 'No?')
+            + (parsed.poDate ? (', Date ' + parsed.poDate) : '')
+            + (n ? (', ' + n + ' item(s)') : ', items nahi mile — manual check')
+            + '. Customer khud select karo.';
+          toast(msg);
+          if (hint) hint.textContent = msg;
+        } catch (e) {
+          console.error(e);
+          toast('PO import fail: ' + (e.message || e));
+          if (hint) hint.textContent = 'Import fail — clear PDF try karo. Customer / Bill To auto nahi bharte.';
+        } finally {
+          poUploadBtn.disabled = false;
+          poUploadBtn.textContent = '📄 Upload PO (auto-fill)';
+        }
+      });
+    }
+
     const previewClose = document.getElementById('previewCloseBtn');
     const previewModal = document.getElementById('previewModal');
     if (previewClose && previewModal) {

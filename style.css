@@ -408,3 +408,7 @@ label > select{
 .preview-modal__frame{
   flex:1;width:100%;border:0;min-height:70vh;background:#e2e8f0;
 }
+
+.po-upload{margin-top:12px;}
+.po-upload .btn{margin-top:0;}
+.po-upload .hint{margin-top:6px;font-size:12px;}
