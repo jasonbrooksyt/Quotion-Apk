@@ -875,11 +875,12 @@ const QGenApp = (function () {
           }
           autosave();
           const n = (parsed.items || []).length;
-          const msg = 'PO import: '
+          let msg = 'PO import' + (parsed.source === 'ai' ? ' (AI)' : '') + ': '
             + (parsed.poNumber ? ('No ' + parsed.poNumber) : 'No?')
-            + (parsed.poDate ? (', Date ' + parsed.poDate) : '')
-            + (n ? (', ' + n + ' item(s)') : ', items nahi mile — manual check')
-            + '. Customer khud select karo.';
+            + (parsed.poDate ? (', Date ' + parsed.poDate) : '');
+          if (n) msg += ', ' + n + ' item(s)';
+          else msg += ', items nahi mile — manual daalo';
+          msg += '. Customer khud select karo.';
           toast(msg);
           if (hint) hint.textContent = msg;
         } catch (e) {

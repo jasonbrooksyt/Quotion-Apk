@@ -1,4 +1,7 @@
-/* po-import.js — Upload PO → PO No, Date, items (desc/qty/rate). No subject / Bill To. */
+/* po-import.js — PO upload → PO No, Date, items.
+ * 1) Optional Gemini AI (set GEMINI_API_KEY in serial-config.js) for accurate parse
+ * 2) Fallback: improved heuristics (unit rate vs line total)
+ */
 
 const PoImport = (function () {
   function normalizeText(t) {
@@ -36,8 +39,8 @@ const PoImport = (function () {
   function isNoiseDesc(desc) {
     if (!desc || desc.length < 3) return true;
     const d = desc.toLowerCase();
-    return /^(rate|price|qty|description|material|hsn|sac|code|total|gst|cgst|sgst|igst|freight|delivery|supplier|registered|attention|page|lapp|kanak|bill\s*to|ship\s*to|sl\s*no|sr\.?\s*no)/i.test(d)
-      || /central\s*gst|state\s*gst|terms\s*of\s*payment|purchase\s*order|other\s*terms/i.test(d);
+    return /^(rate|price|qty|description|material|hsn|sac|code|total|gst|cgst|sgst|igst|freight|delivery|supplier|registered|attention|page|lapp|kanak|bill\s*to|ship\s*to|sl\s*no|sr\.?\s*no|inr|only)/i.test(d)
+      || /central\s*gst|state\s*gst|terms\s*of\s*payment|purchase\s*order|other\s*terms|redmi pad|tablet 4 gb/i.test(d) && d.length < 20;
   }
 
   function cleanDesc(desc) {
@@ -48,34 +51,45 @@ const PoImport = (function () {
       .trim();
   }
 
-  function parsePoText(text) {
+  /** Prefer unit rate: if qty and two amounts, rate is the one where rate*qty ≈ amount */
+  function pickRateAndQty(qty, a, b) {
+    qty = Number(qty) || 0;
+    a = Number(a) || 0;
+    b = Number(b) || 0;
+    if (qty <= 0) return { qty: 0, rate: 0 };
+    // a = rate, b = line total
+    if (a > 0 && b > 0) {
+      const errA = Math.abs(a * qty - b);
+      const errB = Math.abs(b * qty - a);
+      if (errA <= errB && errA <= Math.max(2, b * 0.08)) return { qty, rate: a };
+      if (errB < errA && errB <= Math.max(2, a * 0.08)) return { qty, rate: b };
+      // typical: rate < line total
+      if (a < b) return { qty, rate: a };
+      return { qty, rate: b };
+    }
+    if (a > 0 && b <= 0) {
+      // single amount — if looks like total, derive rate
+      if (qty > 1 && a / qty >= 1) return { qty, rate: Math.round((a / qty) * 100) / 100 };
+      return { qty, rate: a };
+    }
+    return { qty, rate: 0 };
+  }
+
+  function parsePoTextHeuristic(text) {
     const t = normalizeText(text);
-    // Also a flat single-line version for flexible regex
     const flat = t.replace(/\n/g, ' ').replace(/\s+/g, ' ');
+    const result = { poNumber: '', poDate: '', items: [], rawSnippet: t.slice(0, 1200) };
 
-    const result = {
-      poNumber: '',
-      poDate: '',
-      items: [],
-      rawSnippet: t.slice(0, 1200),
-    };
-
-    // ----- PO Number -----
     const poPatterns = [
       /PO\s*No\.?\s*[:.]?\s*([0-9]{6,})/i,
       /P\.?O\.?\s*(?:Number|No\.?)\s*[:.]?\s*([0-9]{6,})/i,
-      /Purchase\s*Order\s*No\.?\s*[:.]?\s*([0-9]{6,})/i,
       /\b(45\d{8,})\b/,
     ];
     for (const re of poPatterns) {
       const m = flat.match(re);
-      if (m) {
-        result.poNumber = m[1];
-        break;
-      }
+      if (m) { result.poNumber = m[1]; break; }
     }
 
-    // ----- PO Date (skip Delivery Date) -----
     let poDateRaw = '';
     if (result.poNumber) {
       const idx = flat.indexOf(result.poNumber);
@@ -84,37 +98,29 @@ const PoImport = (function () {
       if (near) poDateRaw = near[1];
     }
     if (!poDateRaw) {
-      const m = flat.match(
-        /PO\s*No\.?\s*[:.]?\s*[0-9]{6,}[\s\S]{0,60}?Date\s*[:.]?\s*(\d{1,2}[./\-]\d{1,2}[./\-]\d{2,4})/i
-      );
-      if (m) poDateRaw = m[1];
-    }
-    if (!poDateRaw) {
       const all = [...flat.matchAll(/\bDate\s*[:.]?\s*(\d{1,2}[./\-]\d{1,2}[./\-]\d{2,4})/gi)];
       for (const m of all) {
-        const before = flat.slice(Math.max(0, m.index - 25), m.index);
-        if (/Delivery/i.test(before)) continue;
+        if (/Delivery/i.test(flat.slice(Math.max(0, m.index - 25), m.index))) continue;
         poDateRaw = m[1];
         break;
       }
     }
     if (poDateRaw) result.poDate = parseDateToISO(poDateRaw);
 
-    // ----- HSN codes (6-8 digit, not PO-like) -----
+    // HSN: 8-digit customs style often 8544xxxx — avoid pincode 560xxx and PO 45xxxx
     const hsnList = [];
-    for (const m of flat.matchAll(/\b(\d{6,8})\b/g)) {
+    for (const m of flat.matchAll(/\b(\d{8})\b/g)) {
       const n = m[1];
-      if (n.startsWith('45')) continue; // PO nos
-      if (n.length >= 6 && n.length <= 8) hsnList.push(n);
+      if (n.startsWith('45') || n.startsWith('56') || n.startsWith('91')) continue;
+      hsnList.push(n);
     }
 
     const items = [];
-    const unitAlt = 'AU|NOS|NO|EA|EACH|SET|MTR|KG|PCS|PC|UOM|UNITS?|QTY';
+    const unitAlt = 'AU|NOS|NO|EA|EACH|SET|MTR|KG|PCS|PC|UOM|UNITS?';
 
-    // Strategy A: desc + qty + UNIT + rate + amount  (LAPP style)
-    // e.g. Mobile Tablet for Barcode scanner 2.000 AU 19,750.00 39,500.00
+    // Pattern: DESC  QTY  UNIT  RATE  AMOUNT
     const reA = new RegExp(
-      '([A-Za-z][A-Za-z0-9 ,\\-\\/()\\+]{3,100}?)\\s+' +
+      '([A-Za-z][A-Za-z0-9 ,\\-\\/()\\+]{4,100}?)\\s+' +
         '(\\d+(?:\\.\\d+)?)\\s*' +
         '(?:' + unitAlt + ')\\s+' +
         '(\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})?|\\d+\\.\\d{2})\\s+' +
@@ -123,16 +129,27 @@ const PoImport = (function () {
     );
     let m;
     while ((m = reA.exec(flat)) !== null) {
-      const desc = cleanDesc(m[1]);
+      let desc = cleanDesc(m[1]);
       if (isNoiseDesc(desc)) continue;
+      // strip "Redmi Pad..." only if it was stuck as separate terms block — keep product name
       const qty = parseMoney(m[2]);
-      const rate = parseMoney(m[3]);
-      if (qty > 0 && rate >= 1) {
-        items.push({ desc, qty, rate, unit: 'AU', hsn: '', disc: 0, gst: 18 });
+      const a = parseMoney(m[3]);
+      const b = parseMoney(m[4]);
+      const picked = pickRateAndQty(qty, a, b);
+      if (picked.rate >= 1 && picked.qty > 0) {
+        items.push({
+          desc: desc.slice(0, 150),
+          qty: picked.qty,
+          rate: picked.rate,
+          unit: 'AU',
+          hsn: '',
+          disc: 0,
+          gst: 18,
+        });
       }
     }
 
-    // Strategy B: qty AU rate amount — description is text immediately before
+    // Pattern: QTY UNIT RATE AMOUNT (desc before)
     if (!items.length) {
       const reB = new RegExp(
         '(\\d+(?:\\.\\d+)?)\\s*(' + unitAlt + ')\\s+' +
@@ -142,134 +159,168 @@ const PoImport = (function () {
       );
       while ((m = reB.exec(flat)) !== null) {
         const qty = parseMoney(m[1]);
-        const unitRaw = (m[2] || 'AU').toUpperCase();
-        const rate = parseMoney(m[3]);
-        if (qty <= 0 || rate < 1) continue;
-        const before = flat.slice(Math.max(0, m.index - 120), m.index);
-        // Take last "product-like" phrase
-        const dm = before.match(
-          /([A-Za-z][A-Za-z0-9 ,\-\/()]{4,90}?)\s*$/
-        );
-        let desc = dm ? cleanDesc(dm[1]) : '';
-        // Strip trailing table headers stuck on
-        desc = desc.replace(/.*(DESCRIPTION|MATERIAL|CODE)\s+/i, '').trim();
+        const a = parseMoney(m[3]);
+        const b = parseMoney(m[4]);
+        const picked = pickRateAndQty(qty, a, b);
+        if (picked.rate < 1) continue;
+        const before = flat.slice(Math.max(0, m.index - 140), m.index);
+        const dm = before.match(/([A-Za-z][A-Za-z0-9 ,\-\/()]{5,100})\s*$/);
+        let desc = dm ? cleanDesc(dm[1]) : 'Item from PO';
+        desc = desc.replace(/.*(DESCRIPTION|MATERIAL)\s+/i, '').trim();
+        // Remove trailing garbage from address
+        if (/Pilukhedi|Bangalore|Industrial|Plot\s*No/i.test(desc)) desc = 'Item from PO';
         if (isNoiseDesc(desc)) desc = 'Item from PO';
-        let unit = 'AU';
-        if (/NOS|NO|PCS|PC/i.test(unitRaw)) unit = 'Nos';
-        else if (/EACH|EA/i.test(unitRaw)) unit = 'Each';
-        else if (/MTR/i.test(unitRaw)) unit = 'Mtr';
-        else if (/KG/i.test(unitRaw)) unit = 'Kg';
-        else if (/SET/i.test(unitRaw)) unit = 'Set';
-        items.push({ desc: desc.slice(0, 150), qty, rate, unit, hsn: '', disc: 0, gst: 18 });
+        items.push({
+          desc: desc.slice(0, 150),
+          qty: picked.qty,
+          rate: picked.rate,
+          unit: /NOS|NO|PCS/i.test(m[2] || '') ? 'Nos' : 'AU',
+          hsn: '',
+          disc: 0,
+          gst: 18,
+        });
       }
     }
 
-    // Strategy C: line-by-line — line with only numbers after a text line
+    // Line-based
     if (!items.length) {
       const lines = t.split(/\n/).map((l) => l.trim()).filter(Boolean);
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        // "2.000 AU 19,750.00 39,500.00"
         const numLine = line.match(
           new RegExp(
-            '^(\\d+(?:\\.\\d+)?)\\s*(' + unitAlt + ')?\\s*' +
+            '^(\\d+(?:\\.\\d+)?)\\s*(' + unitAlt + ')?\\s+' +
               '(\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})?|\\d+\\.\\d{2})\\s+' +
               '(\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})?|\\d+\\.\\d{2})$',
             'i'
           )
         );
-        if (numLine) {
-          const qty = parseMoney(numLine[1]);
-          const rate = parseMoney(numLine[3]);
-          if (qty <= 0 || rate < 1) continue;
-          // look back for description
-          let desc = 'Item from PO';
-          for (let j = i - 1; j >= Math.max(0, i - 4); j--) {
-            const cand = cleanDesc(lines[j]);
-            if (!isNoiseDesc(cand) && /[A-Za-z]{3}/.test(cand) && cand.length > 4) {
-              desc = cand;
-              break;
-            }
-          }
-          items.push({
-            desc: desc.slice(0, 150),
-            qty,
-            rate,
-            unit: (numLine[2] && /NOS/i.test(numLine[2])) ? 'Nos' : 'AU',
-            hsn: '',
-            disc: 0,
-            gst: 18,
-          });
-          continue;
-        }
-        // same line full
-        const full = line.match(
-          new RegExp(
-            '^(.+?)\\s+(\\d+(?:\\.\\d+)?)\\s*(' + unitAlt + ')\\s+' +
-              '(\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})?|\\d+\\.\\d{2})\\s+' +
-              '(\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})?|\\d+\\.\\d{2})$',
-            'i'
-          )
-        );
-        if (full) {
-          const desc = cleanDesc(full[1]);
-          const qty = parseMoney(full[2]);
-          const rate = parseMoney(full[4]);
-          if (!isNoiseDesc(desc) && qty > 0 && rate >= 1) {
-            items.push({
-              desc,
-              qty,
-              rate,
-              unit: /NOS/i.test(full[3] || '') ? 'Nos' : 'AU',
-              hsn: '',
-              disc: 0,
-              gst: 18,
-            });
+        if (!numLine) continue;
+        const qty = parseMoney(numLine[1]);
+        const picked = pickRateAndQty(qty, parseMoney(numLine[3]), parseMoney(numLine[4]));
+        if (picked.rate < 1) continue;
+        let desc = 'Item from PO';
+        for (let j = i - 1; j >= Math.max(0, i - 5); j--) {
+          const cand = cleanDesc(lines[j]);
+          if (!isNoiseDesc(cand) && /[A-Za-z]{4}/.test(cand) && !/Plot|District|Tel|Email|GSTIN|CIN/i.test(cand)) {
+            desc = cand;
+            break;
           }
         }
+        items.push({
+          desc: desc.slice(0, 150),
+          qty: picked.qty,
+          rate: picked.rate,
+          unit: /NOS/i.test(numLine[2] || '') ? 'Nos' : 'AU',
+          hsn: '',
+          disc: 0,
+          gst: 18,
+        });
       }
     }
 
-    // Strategy D: pair of money values where second ≈ first * small qty
-    // Look for rate-like and amount-like near a small decimal qty
-    if (!items.length) {
-      const reD = /(\d+(?:\.\d{1,3})?)\s+(?:AU|NOS|EA|EACH)?\s*(\d{1,3}(?:,\d{3})+\.\d{2}|\d{2,}\.\d{2})\s+(\d{1,3}(?:,\d{3})+\.\d{2}|\d{2,}\.\d{2})/gi;
-      while ((m = reD.exec(flat)) !== null) {
-        const qty = parseMoney(m[1]);
-        const rate = parseMoney(m[2]);
-        const amt = parseMoney(m[3]);
-        if (qty <= 0 || qty > 100000 || rate < 10) continue;
-        // amount should be in ballpark of qty*rate
-        if (amt > 0 && (amt < rate * 0.5 || amt > rate * qty * 1.2 + 1)) {
-          // if qty is 1-ish and amt ~ rate ok; else skip mismatch
-          if (Math.abs(amt - rate) > 1 && Math.abs(amt - qty * rate) > amt * 0.15) continue;
-        }
-        const before = flat.slice(Math.max(0, m.index - 100), m.index);
-        const dm = before.match(/([A-Za-z][A-Za-z0-9 ,\-\/()]{5,80})\s*$/);
-        let desc = dm ? cleanDesc(dm[1]) : 'Item from PO';
-        if (isNoiseDesc(desc)) desc = 'Item from PO';
-        items.push({ desc: desc.slice(0, 150), qty, rate, unit: 'AU', hsn: '', disc: 0, gst: 18 });
-      }
-    }
-
-    // HSN attach
     items.forEach((it, i) => {
       if (hsnList[i]) it.hsn = hsnList[i];
     });
 
-    // Dedup
     const seen = new Set();
     result.items = items.filter((it) => {
       const key = (it.desc + '|' + it.qty + '|' + it.rate).toLowerCase();
       if (seen.has(key)) return false;
       seen.add(key);
-      if (/central\s*gst|state\s*gst/i.test(it.desc)) return false;
-      // skip pure GST % rows (rate 9.00 amount small)
-      if (it.rate > 0 && it.rate <= 28 && /gst/i.test(it.desc)) return false;
+      if (it.rate <= 28 && /gst/i.test(it.desc)) return false;
       return true;
     }).slice(0, 30);
 
     return result;
+  }
+
+  // ---------- Gemini AI parse ----------
+  function getGeminiKey() {
+    if (typeof GEMINI_API_KEY === 'string' && GEMINI_API_KEY.trim().length > 10) {
+      return GEMINI_API_KEY.trim();
+    }
+    return '';
+  }
+
+  async function parsePoWithGemini(text) {
+    const key = getGeminiKey();
+    if (!key) return null;
+
+    const prompt =
+      'You extract purchase order data for an Indian tax invoice form.\n' +
+      'From the PO text below, return ONLY valid JSON (no markdown) with this shape:\n' +
+      '{\n' +
+      '  "poNumber": "string",\n' +
+      '  "poDate": "YYYY-MM-DD",\n' +
+      '  "items": [\n' +
+      '    { "desc": "material description only", "qty": number, "rate": number, "unit": "AU", "hsn": "string", "gst": 18 }\n' +
+      '  ]\n' +
+      '}\n' +
+      'Rules:\n' +
+      '- rate = UNIT rate (per piece), NOT line total / price amount\n' +
+      '- If qty=2 and amount=39500 and rate column=19750, use rate 19750\n' +
+      '- Do NOT include Bill To, Ship To, supplier address, GST lines, freight-only notes as items\n' +
+      '- desc = product/service name only (not payment terms)\n' +
+      '- poDate is PO date, not delivery date\n' +
+      '- hsn if present else ""\n' +
+      '- unit default AU\n\n' +
+      'PO TEXT:\n' +
+      text.slice(0, 12000);
+
+    const url =
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' +
+      encodeURIComponent(key);
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
+      }),
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error('AI parse failed: ' + res.status + ' ' + errText.slice(0, 120));
+    }
+    const data = await res.json();
+    const raw =
+      (((data || {}).candidates || [])[0] || {}).content ||
+      {};
+    const parts = raw.parts || [];
+    let txt = parts.map((p) => p.text || '').join('\n').trim();
+    txt = txt.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+    const jsonMatch = txt.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('AI ne JSON nahi diya');
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    const items = Array.isArray(parsed.items)
+      ? parsed.items
+          .map((it) => ({
+            desc: String(it.desc || '').trim().slice(0, 200),
+            qty: Number(it.qty) || 0,
+            rate: Number(it.rate) || 0,
+            unit: String(it.unit || 'AU').trim() || 'AU',
+            hsn: String(it.hsn || '').trim(),
+            disc: 0,
+            gst: Number(it.gst) >= 0 ? Number(it.gst) : 18,
+          }))
+          .filter((it) => it.desc && it.qty > 0 && it.rate > 0)
+      : [];
+
+    let poDate = String(parsed.poDate || '').trim();
+    if (poDate && !/^\d{4}-\d{2}-\d{2}$/.test(poDate)) {
+      poDate = parseDateToISO(poDate) || '';
+    }
+
+    return {
+      poNumber: String(parsed.poNumber || '').trim(),
+      poDate,
+      items,
+      rawSnippet: text.slice(0, 400),
+      source: 'ai',
+    };
   }
 
   async function loadPdfJs() {
@@ -295,7 +346,6 @@ const PoImport = (function () {
     for (let p = 1; p <= maxPages; p++) {
       const page = await pdf.getPage(p);
       const content = await page.getTextContent();
-      // Group by approximate Y → lines (helps table rows)
       const rows = {};
       content.items.forEach((it) => {
         const x = it.transform ? it.transform[4] : 0;
@@ -304,13 +354,12 @@ const PoImport = (function () {
         if (!rows[key]) rows[key] = [];
         rows[key].push({ x, str: it.str });
       });
-      const ys = Object.keys(rows)
+      Object.keys(rows)
         .map(Number)
-        .sort((a, b) => b - a); // pdf y goes up
-      ys.forEach((y) => {
-        const parts = rows[String(y)].sort((a, b) => a.x - b.x).map((c) => c.str);
-        text += parts.join(' ') + '\n';
-      });
+        .sort((a, b) => b - a)
+        .forEach((y) => {
+          text += rows[String(y)].sort((a, b) => a.x - b.x).map((c) => c.str).join(' ') + '\n';
+        });
       text += '\n';
     }
     return text;
@@ -349,14 +398,29 @@ const PoImport = (function () {
     if (!text || text.trim().length < 20) {
       throw new Error('PO se text nahi mila — clear PDF try karo');
     }
-    const parsed = parsePoText(text);
-    // Debug aid in console for tuning
+
     try {
-      console.log('[PO import] text sample:', text.slice(0, 600));
-      console.log('[PO import] parsed:', parsed);
+      console.log('[PO import] text sample:', text.slice(0, 800));
     } catch (e) {}
-    return parsed;
+
+    // AI first (if key set)
+    if (getGeminiKey()) {
+      try {
+        const ai = await parsePoWithGemini(text);
+        if (ai && (ai.poNumber || (ai.items && ai.items.length))) {
+          try { console.log('[PO import] AI result:', ai); } catch (e) {}
+          return ai;
+        }
+      } catch (e) {
+        console.warn('[PO import] AI failed, using heuristic', e);
+      }
+    }
+
+    const heuristic = parsePoTextHeuristic(text);
+    heuristic.source = 'heuristic';
+    try { console.log('[PO import] heuristic:', heuristic); } catch (e) {}
+    return heuristic;
   }
 
-  return { importFile, parsePoText };
+  return { importFile, parsePoText: parsePoTextHeuristic };
 })();
