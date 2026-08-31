@@ -335,24 +335,36 @@ const PoImport = (function () {
     );
   }
 
-  async function callGeminiModel(key, model, prompt) {
+  async function callGeminiModel(key, model, prompt, timeoutMs) {
     const url =
       'https://generativelanguage.googleapis.com/v1beta/models/' +
       model +
       ':generateContent?key=' +
       encodeURIComponent(key);
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0,
-          maxOutputTokens: 2048,
-          responseMimeType: 'application/json',
-        },
-      }),
-    });
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const ms = timeoutMs || 45000;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), ms) : null;
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: ctrl ? ctrl.signal : undefined,
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 1024,
+            responseMimeType: 'application/json',
+          },
+        }),
+      });
+    } catch (e) {
+      if (e && e.name === 'AbortError') throw new Error('AI timeout (' + Math.round(ms / 1000) + 's)');
+      throw e;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     const errBody = !res.ok ? await res.text().catch(() => '') : '';
     if (!res.ok) {
       let msg = 'HTTP ' + res.status;
@@ -424,27 +436,21 @@ const PoImport = (function () {
     if (!key) return null;
 
     const prompt = buildPoPrompt(text);
-    // Try models in order (AI Studio free tier)
-    // 2026: 2.0 / 1.5 shut down — use 3.x Flash; also try API list
-    let models = [
-      'gemini-3.6-flash',
-      'gemini-3.7-flash',
-      'gemini-3.5-flash',
-      'gemini-3.5-flash-lite',
-    ];
+    // Fast path: 1 model only (cached from last success / Test)
+    let model = 'gemini-3.6-flash';
     try {
-      const listed = await listGeminiModels(key);
-      if (listed.length) {
-        const ordered = models.filter((p) => listed.some((l) => l === p || l.startsWith(p)));
-        models = ordered.length ? ordered.concat(listed.filter((l) => !ordered.includes(l)).slice(0, 3)) : listed.slice(0, 6);
-      }
-    } catch (e) {
-      console.warn('[PO import] list models', e);
-    }
+      const cached = localStorage.getItem('kmf_gemini_model');
+      if (cached && /gemini-3/i.test(cached)) model = cached;
+    } catch (e) {}
+
+    const tryModels = [model];
+    if (model !== 'gemini-3.6-flash') tryModels.push('gemini-3.6-flash');
+    if (model !== 'gemini-3.5-flash-lite') tryModels.push('gemini-3.5-flash-lite');
+
     let lastErr = null;
-    for (const model of models) {
+    for (const mName of tryModels) {
       try {
-        let txt = await callGeminiModel(key, model, prompt);
+        let txt = await callGeminiModel(key, mName, prompt, 40000);
         txt = String(txt || '')
           .replace(/^```json\s*/i, '')
           .replace(/^```\s*/i, '')
@@ -452,24 +458,22 @@ const PoImport = (function () {
           .trim();
         const jsonMatch = txt.match(/\{[\s\S]*\}/);
         if (!jsonMatch) {
-          lastErr = new Error('AI JSON missing (' + model + ')');
+          lastErr = new Error('AI JSON missing');
           continue;
         }
         const parsed = JSON.parse(jsonMatch[0]);
         const result = normalizeAiResult(parsed, text);
-        result.model = model;
+        result.model = mName;
         if (!result.poNumber && !(result.items && result.items.length)) {
-          lastErr = new Error('AI empty items (' + model + ')');
+          lastErr = new Error('AI empty items');
           continue;
         }
+        try { localStorage.setItem('kmf_gemini_model', mName); } catch (e) {}
         return result;
       } catch (e) {
         lastErr = e;
-        // 400 API key invalid — no point trying other models
         const msg = String(e.message || e);
-        if (/API key|invalid|PERMISSION|403|401/i.test(msg) && e.status !== 404) {
-          break;
-        }
+        if (/API key|invalid|PERMISSION|401|403/i.test(msg)) break;
         continue;
       }
     }
@@ -502,29 +506,13 @@ const PoImport = (function () {
 
   async function testGeminiKey() {
     const key = getGeminiKey();
-    if (!key) throw new Error('Pehle key Save on this phone karo');
-    const preferred = [
-      'gemini-3.6-flash',
-      'gemini-3.7-flash',
-      'gemini-3.5-flash',
-      'gemini-3.5-flash-lite',
-    ];
-    // Always try 3.6-flash first (Google current recommendation)
-    let models = preferred.slice();
-    try {
-      const listed = await listGeminiModels(key);
-      if (listed.length) {
-        const ordered = preferred.filter((p) => listed.some((l) => l === p || l.startsWith(p)));
-        const extra = listed.filter((l) => !models.includes(l) && !/1\.5|2\.0/i.test(l));
-        models = (ordered.length ? ordered : preferred).concat(extra).slice(0, 6);
-      }
-    } catch (e) {
-      console.warn('list models', e);
-    }
+    if (!key) throw new Error('Key save karo');
+    const models = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash'];
     let lastErr = null;
     for (const model of models) {
       try {
-        const txt = await callGeminiModel(key, model, 'Reply with JSON only: {"ok":true}');
+        const txt = await callGeminiModel(key, model, 'Reply with JSON only: {"ok":true}', 20000);
+        try { localStorage.setItem('kmf_gemini_model', model); } catch (e) {}
         return { ok: true, model, txt };
       } catch (e) {
         lastErr = e;
@@ -551,7 +539,7 @@ const PoImport = (function () {
     const pdfjsLib = await loadPdfJs();
     const buf = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-    const maxPages = Math.min(pdf.numPages, 4);
+    const maxPages = Math.min(pdf.numPages, 2); // page 1-2 enough for items
     let text = '';
     for (let p = 1; p <= maxPages; p++) {
       const page = await pdf.getPage(p);
@@ -588,8 +576,11 @@ const PoImport = (function () {
   }
 
   async function extractTextFromImage(file) {
+    // OCR is slow on phone (1–3 min). Prefer PDF when possible.
     const Tesseract = await loadTesseract();
-    const result = await Tesseract.recognize(file, 'eng', { logger: () => {} });
+    const result = await Tesseract.recognize(file, 'eng', {
+      logger: () => {},
+    });
     return result.data.text || '';
   }
 

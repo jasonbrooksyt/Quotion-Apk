@@ -917,7 +917,8 @@ const QGenApp = (function () {
         poUploadBtn.textContent = 'Reading…';
         const hint = document.getElementById('poUploadHint');
         try {
-          toast('PO padh rahe hain…');
+          const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name || '');
+          toast(isPdf ? 'PDF padh rahe hain…' : 'Photo OCR slow ho sakta hai — PDF better');
           const parsed = await PoImport.importFile(file);
           // PO No + Date
           if (parsed.poNumber) {
