@@ -254,26 +254,54 @@ const PoImport = (function () {
 
   function buildPoPrompt(text) {
     return (
-      'Extract line items from this Indian Purchase Order for a tax invoice.\n' +
-      'Return ONLY a JSON object (no markdown, no explanation):\n' +
+      'You are a data-entry assistant for Kanak Mechanicals tax invoices in India.\n' +
+      'Read the Purchase Order (PO) text and extract ONLY these fields.\n\n' +
+      'Return ONLY valid JSON (no markdown, no extra text):\n' +
       '{\n' +
-      '  "poNumber": "",\n' +
+      '  "poNumber": "string",\n' +
       '  "poDate": "YYYY-MM-DD",\n' +
       '  "items": [\n' +
-      '    { "desc": "", "qty": 0, "rate": 0, "unit": "AU", "hsn": "", "gst": 18 }\n' +
+      '    {\n' +
+      '      "desc": "string",\n' +
+      '      "qty": number,\n' +
+      '      "rate": number,\n' +
+      '      "unit": "AU",\n' +
+      '      "hsn": "string",\n' +
+      '      "gst": 18\n' +
+      '    }\n' +
       '  ]\n' +
       '}\n\n' +
-      'CRITICAL rules:\n' +
-      '1. rate = UNIT RATE per piece (column RATE / Unit Rate), NEVER the line PRICE/AMOUNT total.\n' +
-      '   Example: Qty 2, Rate 19750.00, Price 39500.00 → rate must be 19750, not 39500.\n' +
-      '2. If only one money value and qty>1, rate = amount/qty.\n' +
-      '3. desc = product name only (e.g. "Mobile Tablet for Barcode scanner").\n' +
-      '   Do NOT put payment terms, Redmi specs from notes, freight notes as the only desc unless that is the item.\n' +
-      '4. Ignore: Bill To, Ship To, supplier address, CGST/SGST %, freight-only lines, grand total rows.\n' +
-      '5. poDate = PO header Date, not Delivery Date.\n' +
-      '6. unit = AU if PO says AU, else Nos/Each as written.\n' +
-      '7. hsn = HSN/SAC code if present (usually 6-8 digits like 85446020), else "".\n\n' +
-      'PO TEXT:\n' +
+      '========== WHAT TO EXTRACT ==========\n' +
+      '1) poNumber\n' +
+      '   - Label: PO No. / PO Number / Purchase Order No.\n' +
+      '   - Example: 45000084135\n\n' +
+      '2) poDate\n' +
+      '   - The DATE next to PO No. in the PO header box\n' +
+      '   - Format output as YYYY-MM-DD (e.g. 19.08.2026 → 2026-08-19)\n' +
+      '   - DO NOT use Delivery Date\n\n' +
+      '3) items[] — one object per material/service LINE in the item table\n' +
+      '   - desc: Material / service description from DESCRIPTION column only\n' +
+      '     Example: "Mobile Tablet for Barcode scanner"\n' +
+      '   - qty: Quantity number from QTY column (e.g. 2.000 → 2)\n' +
+      '   - unit: Unit of measure (AU, NOS, EA, etc.). Default "AU"\n' +
+      '   - rate: UNIT RATE from RATE (INR) column — price PER ONE unit\n' +
+      '     Example: RATE 19,750.00 and PRICE 39,500.00 and QTY 2\n' +
+      '              → rate = 19750  (NOT 39500)\n' +
+      '   - hsn: HSN/SAC code if shown (e.g. 85446020), else ""\n' +
+      '   - gst: 18 unless PO clearly shows another %\n\n' +
+      '========== DO NOT EXTRACT ==========\n' +
+      '- Bill To / Ship To / customer address / GSTIN of buyer\n' +
+      '- Supplier address, phone, email\n' +
+      '- CGST / SGST / IGST percentage rows as items\n' +
+      '- Freight lines, payment terms, "OTHER TERMS", notes, Redmi specs in terms\n' +
+      '- Grand total / TOTAL row as an item\n' +
+      '- Subject field (user types subject manually)\n\n' +
+      '========== RATE RULE (MOST IMPORTANT) ==========\n' +
+      'rate MUST be unit rate, never line total.\n' +
+      'If QTY=2, RATE=19750, PRICE/AMOUNT=39500 → "rate": 19750\n' +
+      'If you only see one amount and qty>1, rate = amount / qty\n' +
+      'Never set rate equal to qty (e.g. rate:2 is WRONG)\n\n' +
+      '========== PO TEXT ==========\n' +
       text.slice(0, 14000)
     );
   }
@@ -366,11 +394,10 @@ const PoImport = (function () {
     // Try models in order (AI Studio free tier)
     // 2026: 2.0 / 1.5 shut down — use 3.x Flash; also try API list
     let models = [
-      'gemini-3.5-flash-lite',
-      'gemini-3.5-flash',
       'gemini-3.6-flash',
       'gemini-3.7-flash',
-      'gemini-2.5-flash',
+      'gemini-3.5-flash',
+      'gemini-3.5-flash-lite',
     ];
     try {
       const listed = await listGeminiModels(key);
@@ -434,7 +461,7 @@ const PoImport = (function () {
       const id = String(m.name || '').replace(/^models\//, '');
       const actions = m.supportedGenerationMethods || m.supported_actions || [];
       if (actions.includes('generateContent') || !actions.length) {
-        if (/gemini/i.test(id) && !/embed|image|tts|live/i.test(id)) names.push(id);
+        if (/gemini/i.test(id) && !/embed|image|tts|live|1\.5|2\.0/i.test(id)) names.push(id);
       }
     });
     return names;
@@ -444,19 +471,19 @@ const PoImport = (function () {
     const key = getGeminiKey();
     if (!key) throw new Error('Pehle key Save on this phone karo');
     const preferred = [
-      'gemini-3.5-flash-lite',
-      'gemini-3.5-flash',
       'gemini-3.6-flash',
       'gemini-3.7-flash',
-      'gemini-2.5-flash',
+      'gemini-3.5-flash',
+      'gemini-3.5-flash-lite',
     ];
-    let models = preferred;
+    // Always try 3.6-flash first (Google current recommendation)
+    let models = preferred.slice();
     try {
       const listed = await listGeminiModels(key);
       if (listed.length) {
-        // prefer listed that match preferred order
         const ordered = preferred.filter((p) => listed.some((l) => l === p || l.startsWith(p)));
-        models = ordered.length ? ordered : listed.slice(0, 5);
+        const extra = listed.filter((l) => !models.includes(l) && !/1\.5|2\.0/i.test(l));
+        models = (ordered.length ? ordered : preferred).concat(extra).slice(0, 6);
       }
     } catch (e) {
       console.warn('list models', e);
