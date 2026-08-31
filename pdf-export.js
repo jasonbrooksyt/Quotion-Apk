@@ -346,54 +346,46 @@ const PdfExport = (function () {
         y = drawTableHeader(doc, y, cols, headerOpts);
       }
 
+      const qNum = Number(it.qty) || 0;
+      const rNum = Number(it.rate) || 0;
+      const taxableNum = (it.taxable != null) ? Number(it.taxable) : Utils.round2(qNum * rNum * (1 - (Number(it.disc) || 0) / 100));
       const qtyStr = isInvoice
-        ? (String(it.qty).padStart(2, '0') + ' ' + (it.unit || 'EA')).trim()
-        : (it.qty + ' ' + (it.unit || '')).trim();
+        ? (String(qNum).padStart(2, '0') + ' ' + (it.unit || 'AU')).trim()
+        : (qNum + ' ' + (it.unit || '')).trim();
 
-      const gross = Utils.round2((Number(it.qty) || 0) * (Number(it.rate) || 0));
-      const discAmt = (it.discAmt != null) ? Number(it.discAmt) : Utils.round2(gross * (Number(it.disc) || 0) / 100);
       const vals = {
         sno: String(idx + 1),
         desc: null,
         hsn: it.hsn || '',
         qty: qtyStr,
-        rate: Utils.fmtMoney(it.rate),
+        rate: Utils.fmtMoney(rNum),
         disc: (Number(it.disc) ? Utils.round2(Number(it.disc)) + '%' : '0%'),
-        gst: it.gst + '%',
+        gst: (Number(it.gst) || 0) + '%',
         gstAmt: Utils.fmtMoney(it.gstAmt),
-        total: Utils.fmtMoney(it.taxable),
+        total: Utils.fmtMoney(taxableNum),
       };
 
       doc.setDrawColor(0, 0, 0);
+      doc.setTextColor(0, 0, 0);
       doc.setLineWidth(0.25);
       cols.forEach((c, i) => {
         const x = colX(cols, i);
         doc.rect(x, y, c.w, rowH);
         if (c.key === 'desc') {
-          // Clip text strictly inside description cell
-          doc.saveGraphicsState();
-          doc.rect(x + 0.4, y + 0.4, c.w - 0.8, rowH - 0.8, null);
-          doc.clip();
           doc.setFont(undefined, 'normal');
           doc.setFontSize(8);
+          // already wrapped to column width — no clip (clip was hiding qty/rate/amount)
           doc.text(descLines, x + 1.2, y + 4.2);
-          doc.restoreGraphicsState();
         } else if (c.key === 'sno') {
           doc.setFont(undefined, 'bold');
           doc.setFontSize(9);
-          const tx = x + c.w / 2;
-          doc.text(String(vals[c.key] || ''), tx, y + 5, { align: 'center' });
+          doc.text(String(vals[c.key] || ''), x + c.w / 2, y + 5, { align: 'center' });
         } else {
           doc.setFont(undefined, c.key === 'total' ? 'bold' : 'normal');
           doc.setFontSize(8);
+          const txt = String(vals[c.key] != null ? vals[c.key] : '');
           const tx = c.align === 'center' ? x + c.w / 2 : c.align === 'right' ? x + c.w - 1.5 : x + 1.5;
-          // soft clip other cells too (qty/rate can be long)
-          const txt = String(vals[c.key] || '');
-          doc.saveGraphicsState();
-          doc.rect(x + 0.3, y + 0.3, c.w - 0.6, rowH - 0.6, null);
-          doc.clip();
           doc.text(txt, tx, y + 5, { align: c.align === 'left' ? 'left' : c.align });
-          doc.restoreGraphicsState();
         }
       });
       y += rowH;
@@ -566,7 +558,10 @@ const PdfExport = (function () {
   async function loadQrDataUrl(upiUri) {
     try {
       const qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data=' + encodeURIComponent(upiUri);
-      const res = await fetch(qrUrl);
+      const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timer = ctrl ? setTimeout(() => ctrl.abort(), 8000) : null;
+      const res = await fetch(qrUrl, { signal: ctrl ? ctrl.signal : undefined });
+      if (timer) clearTimeout(timer);
       if (!res.ok) return null;
       const blob = await res.blob();
       return await new Promise((resolve, reject) => {
