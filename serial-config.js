@@ -51,3 +51,6 @@ const APP_PIN = '112266';
 
 /** History mein kitni recent quotations edit ke liye */
 const HISTORY_EDIT_LIMIT = 3;
+
+/** Google AI Studio key — PO items accurate extract */
+const GEMINI_API_KEY = 'AQ.Ab8RN6LlcEMTUrt1yzHslCHRjoQT63XB4EtU3LOe1TnEWpoaHA';
