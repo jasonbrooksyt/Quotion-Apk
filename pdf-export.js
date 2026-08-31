@@ -257,13 +257,13 @@ const PdfExport = (function () {
     if (isInvoice) {
       // Match reference Tax Invoice columns (no GST columns in body table)
       return [
-        { key: 'sno', label: 'Sr.No.', w: 12, align: 'center' },
-        { key: 'desc', label: 'Material/ Service Descriptions', w: 72, align: 'left' },
-        { key: 'hsn', label: 'HSN/SAC\nCODE', w: 22, align: 'center' },
+        { key: 'sno', label: 'Sr.No.', w: 11, align: 'center' },
+        { key: 'desc', label: 'Material/ Service Descriptions', w: 78, align: 'left' },
+        { key: 'hsn', label: 'HSN/SAC\nCODE', w: 18, align: 'center' },
         { key: 'qty', label: 'Qty.', w: 16, align: 'center' },
-        { key: 'rate', label: 'Unit Rate', w: 22, align: 'center' },
-        { key: 'disc', label: 'Disc. %', w: 16, align: 'center' },
-        { key: 'total', label: 'Amount\n(in Rupees)', w: 26, align: 'right' },
+        { key: 'rate', label: 'Unit Rate', w: 21, align: 'center' },
+        { key: 'disc', label: 'Disc. %', w: 14, align: 'center' },
+        { key: 'total', label: 'Amount\n(in Rupees)', w: 28, align: 'right' },
       ];
     }
     return [
@@ -325,8 +325,20 @@ const PdfExport = (function () {
     // Compact rows (no per-item stretch). Extra space stays AFTER all items, before bank.
 
     items.forEach((it, idx) => {
-      const descLines = doc.splitTextToSize(it.desc || '', cols[1].w - 3);
-      const rowH = Math.max(9, descLines.length * 3.6 + 4);
+      // Font size FIRST so wrap width matches drawn text (prevent overflow into next col)
+      doc.setFont(undefined, 'normal');
+      doc.setFontSize(8);
+      const descCol = cols.find((c) => c.key === 'desc') || cols[1];
+      const descMaxW = Math.max(8, descCol.w - 3.5);
+      let descLines = doc.splitTextToSize(String(it.desc || ''), descMaxW);
+      // Cap lines so row stays readable; last line ellipsis if clipped
+      const maxDescLines = 6;
+      if (descLines.length > maxDescLines) {
+        descLines = descLines.slice(0, maxDescLines);
+        const last = String(descLines[maxDescLines - 1] || '');
+        descLines[maxDescLines - 1] = last.length > 3 ? last.slice(0, -3) + '...' : last + '...';
+      }
+      const rowH = Math.max(9, descLines.length * 3.4 + 4);
 
       if (y + rowH > PAGE_H - MARGIN - 20 && !isInvoice) {
         doc.addPage();
@@ -358,9 +370,14 @@ const PdfExport = (function () {
         const x = colX(cols, i);
         doc.rect(x, y, c.w, rowH);
         if (c.key === 'desc') {
+          // Clip text strictly inside description cell
+          doc.saveGraphicsState();
+          doc.rect(x + 0.4, y + 0.4, c.w - 0.8, rowH - 0.8, null);
+          doc.clip();
           doc.setFont(undefined, 'normal');
-          doc.setFontSize(9);
-          doc.text(descLines, x + 1.5, y + 5);
+          doc.setFontSize(8);
+          doc.text(descLines, x + 1.2, y + 4.2);
+          doc.restoreGraphicsState();
         } else if (c.key === 'sno') {
           doc.setFont(undefined, 'bold');
           doc.setFontSize(9);
@@ -370,7 +387,13 @@ const PdfExport = (function () {
           doc.setFont(undefined, c.key === 'total' ? 'bold' : 'normal');
           doc.setFontSize(8);
           const tx = c.align === 'center' ? x + c.w / 2 : c.align === 'right' ? x + c.w - 1.5 : x + 1.5;
-          doc.text(String(vals[c.key] || ''), tx, y + 5, { align: c.align === 'left' ? 'left' : c.align });
+          // soft clip other cells too (qty/rate can be long)
+          const txt = String(vals[c.key] || '');
+          doc.saveGraphicsState();
+          doc.rect(x + 0.3, y + 0.3, c.w - 0.6, rowH - 0.6, null);
+          doc.clip();
+          doc.text(txt, tx, y + 5, { align: c.align === 'left' ? 'left' : c.align });
+          doc.restoreGraphicsState();
         }
       });
       y += rowH;
@@ -568,10 +591,10 @@ const PdfExport = (function () {
     const halfGst = Utils.round2(mainGst / 2);
 
     // Align with item columns: Bank = Sr+Desc | QR = HSN+Qty | Totals = Rate+Disc+Amt
-    // Col widths: 12+72 | 22+16 | 22+16+26  = 84 | 38 | 64
-    const leftW = 84;
-    const midW = 38;
-    const rightW = CONTENT_W - leftW - midW; // 64
+    // Col widths: 11+78 | 18+16 | 21+14+28  = 89 | 34 | 63
+    const leftW = 89;
+    const midW = 34;
+    const rightW = CONTENT_W - leftW - midW; // 63
     const boxH = 44;
     const boxTop = y;
 
