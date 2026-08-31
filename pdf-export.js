@@ -1,4 +1,4 @@
-/* pdf-export.js — builds a print-ready A4 quotation PDF using jsPDF (vendored, offline).
+/* pdf-export.js — v11 builds a print-ready A4 quotation PDF using jsPDF (vendored, offline).
    Layout mirrors the company's existing invoice format: one continuous bordered
    header box (title / company / GSTIN+Mobile / Quotation No.+Date / To / Ref+Validity),
    then a bordered item table, then a totals box + Amount in Words bar + signatory. */
@@ -9,6 +9,17 @@ const PdfExport = (function () {
   const MARGIN = 12;
   const CONTENT_W = PAGE_W - MARGIN * 2;
   const MIDX = MARGIN + CONTENT_W / 2;
+
+  function pdfMoney(n) {
+    const num = Utils.round2(Number(n) || 0);
+    const neg = num < 0;
+    const abs = Math.abs(num);
+    const fixed = abs.toFixed(2);
+    const parts = fixed.split('.');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return (neg ? '-' : '') + parts.join('.');
+  }
+
 
 
   async function buildPdfDoc(data) {
@@ -36,10 +47,11 @@ const PdfExport = (function () {
 
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.4);
+    // Stroke only — never fill (fill would wipe item text)
     if (isInvoice && bankTopY != null) {
-      doc.rect(MARGIN, bodyTop, CONTENT_W, Math.max(0, bankTopY - bodyTop));
+      doc.rect(MARGIN, bodyTop, CONTENT_W, Math.max(0, bankTopY - bodyTop), 'S');
     } else {
-      doc.rect(MARGIN, bodyTop, CONTENT_W, y - bodyTop);
+      doc.rect(MARGIN, bodyTop, CONTENT_W, Math.max(0, y - bodyTop), 'S');
     }
     return { doc, isInvoice };
   }
@@ -358,11 +370,11 @@ const PdfExport = (function () {
         desc: null,
         hsn: it.hsn || '',
         qty: qtyStr,
-        rate: Utils.fmtMoney(rNum),
+        rate: pdfMoney(rNum),
         disc: (Number(it.disc) ? Utils.round2(Number(it.disc)) + '%' : '0%'),
         gst: (Number(it.gst) || 0) + '%',
-        gstAmt: Utils.fmtMoney(it.gstAmt),
-        total: Utils.fmtMoney(taxableNum),
+        gstAmt: pdfMoney(it.gstAmt),
+        total: pdfMoney(taxableNum),
       };
 
       doc.setDrawColor(0, 0, 0);
@@ -374,18 +386,33 @@ const PdfExport = (function () {
         if (c.key === 'desc') {
           doc.setFont(undefined, 'normal');
           doc.setFontSize(8);
-          // already wrapped to column width — no clip (clip was hiding qty/rate/amount)
-          doc.text(descLines, x + 1.2, y + 4.2);
+          // Draw line-by-line (array form of text() can break later columns in jsPDF)
+          const lines = Array.isArray(descLines) ? descLines : [String(descLines || '')];
+          lines.forEach((ln, li) => {
+            doc.text(String(ln), x + 1.2, y + 4.2 + li * 3.4);
+          });
         } else if (c.key === 'sno') {
           doc.setFont(undefined, 'bold');
           doc.setFontSize(9);
-          doc.text(String(vals[c.key] || ''), x + c.w / 2, y + 5, { align: 'center' });
+          doc.text(String(vals.sno || ''), x + c.w / 2, y + 5.2, { align: 'center' });
         } else {
           doc.setFont(undefined, c.key === 'total' ? 'bold' : 'normal');
           doc.setFontSize(8);
-          const txt = String(vals[c.key] != null ? vals[c.key] : '');
-          const tx = c.align === 'center' ? x + c.w / 2 : c.align === 'right' ? x + c.w - 1.5 : x + 1.5;
-          doc.text(txt, tx, y + 5, { align: c.align === 'left' ? 'left' : c.align });
+          let txt = vals[c.key];
+          if (txt == null || txt === '') {
+            if (c.key === 'qty') txt = '0';
+            else if (c.key === 'rate' || c.key === 'total' || c.key === 'gstAmt') txt = '0.00';
+            else if (c.key === 'disc') txt = '0%';
+            else txt = '';
+          }
+          txt = String(txt);
+          if (c.align === 'right') {
+            doc.text(txt, x + c.w - 1.5, y + 5.2, { align: 'right' });
+          } else if (c.align === 'center') {
+            doc.text(txt, x + c.w / 2, y + 5.2, { align: 'center' });
+          } else {
+            doc.text(txt, x + 1.2, y + 5.2);
+          }
         }
       });
       y += rowH;
@@ -432,12 +459,12 @@ const PdfExport = (function () {
     const mainGst = gstRates.length ? gstRates[0] : 18;
     const halfGst = Utils.round2(mainGst / 2);
 
-    const rows = [['Taxable Amount', Utils.fmtMoney(t.taxable)]];
+    const rows = [['Taxable Amount', pdfMoney(t.taxable)]];
     if (data.meta.gstType === 'IGST') {
-      rows.push(['IGST ' + mainGst + '%', Utils.fmtMoney(t.igst)]);
+      rows.push(['IGST ' + mainGst + '%', pdfMoney(t.igst)]);
     } else {
-      rows.push(['CGST ' + halfGst + '%', Utils.fmtMoney(t.cgst)]);
-      rows.push(['SGST ' + halfGst + '%', Utils.fmtMoney(t.sgst)]);
+      rows.push(['CGST ' + halfGst + '%', pdfMoney(t.cgst)]);
+      rows.push(['SGST ' + halfGst + '%', pdfMoney(t.sgst)]);
     }
     if (t.chargesTotal) rows.push(['Add. Charges', Utils.fmtMoney(t.chargesTotal)]);
     if (data.overallDiscount) rows.push(['Discount', '-' + Utils.fmtMoney(data.overallDiscount)]);
@@ -462,7 +489,7 @@ const PdfExport = (function () {
     doc.setFontSize(10);
     doc.text('Grand Total', boxX + 2, ry + (rowH + 1) / 2 + 1.3);
     const currencySymbol = data.meta.currency === 'USD' ? '$' : 'Rs.';
-    doc.text(`${currencySymbol} ${Utils.fmtMoney(t.finalAmount)}`, boxX + boxW - 2, ry + (rowH + 1) / 2 + 1.3, { align: 'right' });
+    doc.text(`${currencySymbol} ${pdfMoney(t.finalAmount)}`, boxX + boxW - 2, ry + (rowH + 1) / 2 + 1.3, { align: 'right' });
     doc.setFont(undefined, 'normal');
     ry += rowH + 1;
 
@@ -644,12 +671,12 @@ const PdfExport = (function () {
     // Totals right — internal lines only (outer frame already drawn; keeps QR top line clean)
     const tx = MARGIN + leftW + midW;
     const rowH = 9;
-    const totalRows = [['Taxable Amount', Utils.fmtMoney(t.taxable)]];
+    const totalRows = [['Taxable Amount', pdfMoney(t.taxable)]];
     if (data.meta.gstType === 'IGST') {
-      totalRows.push(['IGST  ' + mainGst + '%', Utils.fmtMoney(t.igst)]);
+      totalRows.push(['IGST  ' + mainGst + '%', pdfMoney(t.igst)]);
     } else {
-      totalRows.push(['CGST  ' + halfGst + '%', Utils.fmtMoney(t.cgst)]);
-      totalRows.push(['SGST  ' + halfGst + '%', Utils.fmtMoney(t.sgst)]);
+      totalRows.push(['CGST  ' + halfGst + '%', pdfMoney(t.cgst)]);
+      totalRows.push(['SGST  ' + halfGst + '%', pdfMoney(t.sgst)]);
     }
     let ry = boxTop;
     totalRows.forEach(([label, val]) => {
@@ -672,7 +699,7 @@ const PdfExport = (function () {
     doc.setFont(undefined, 'bold');
     doc.setFontSize(10);
     doc.text('Grand Total', tx + 2, ry + gtH / 2 + 1.4);
-    doc.text(Utils.fmtMoney(t.finalAmount), tx + rightW - 2, ry + gtH / 2 + 1.4, { align: 'right' });
+    doc.text(pdfMoney(t.finalAmount), tx + rightW - 2, ry + gtH / 2 + 1.4, { align: 'right' });
 
     y = boxTop + boxH;
 
