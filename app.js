@@ -15,7 +15,7 @@ const QGenApp = (function () {
     if (values) {
       node.querySelector('[data-field="desc"]').value = values.desc || '';
       node.querySelector('[data-field="hsn"]').value = values.hsn || '';
-      node.querySelector('[data-field="unit"]').value = values.unit || 'Each';
+      node.querySelector('[data-field="unit"]').value = values.unit || 'AU';
       node.querySelector('[data-field="qty"]').value = values.qty ?? 1;
       node.querySelector('[data-field="rate"]').value = (values.rate != null && values.rate !== '') ? values.rate : '';
       node.querySelector('[data-field="disc"]').value = values.disc ?? 0;
@@ -841,7 +841,7 @@ const QGenApp = (function () {
           return;
         }
         poUploadBtn.disabled = true;
-        poUploadBtn.textContent = 'Reading PO…';
+        poUploadBtn.textContent = 'Reading…';
         const hint = document.getElementById('poUploadHint');
         try {
           toast('PO padh rahe hain…');
@@ -855,10 +855,7 @@ const QGenApp = (function () {
             const el = document.getElementById('poDate');
             if (el) el.value = parsed.poDate;
           }
-          if (parsed.subject) {
-            const el = document.getElementById('subject');
-            if (el && !el.value.trim()) el.value = parsed.subject;
-          }
+          // Subject: never auto-fill from PO (manual only)
           // Items — replace rows (customer untouched)
           if (parsed.items && parsed.items.length) {
             itemsWrap.innerHTML = '';
@@ -866,7 +863,7 @@ const QGenApp = (function () {
               addItem({
                 desc: it.desc,
                 hsn: it.hsn || '',
-                unit: it.unit || 'Each',
+                unit: it.unit || 'AU',
                 qty: it.qty,
                 rate: it.rate,
                 disc: it.disc || 0,
@@ -891,7 +888,7 @@ const QGenApp = (function () {
           if (hint) hint.textContent = 'Import fail — clear PDF try karo. Customer / Bill To auto nahi bharte.';
         } finally {
           poUploadBtn.disabled = false;
-          poUploadBtn.textContent = '📄 Upload PO (auto-fill)';
+          poUploadBtn.textContent = '📄 Upload PO';
         }
       });
     }
