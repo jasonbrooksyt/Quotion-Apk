@@ -66,12 +66,25 @@ const PdfExport = (function () {
     const url = URL.createObjectURL(blob);
     const modal = document.getElementById('previewModal');
     const frame = document.getElementById('previewFrame');
-    if (modal && frame) {
-      frame.src = url;
-      modal.classList.remove('hidden');
-    } else {
-      window.open(url, '_blank');
+    try {
+      if (modal && frame) {
+        frame.src = url;
+        modal.classList.remove('hidden');
+        // Mobile browsers sometimes blank iframe for blob — fallback after short check
+        setTimeout(() => {
+          try {
+            const doc2 = frame.contentDocument;
+            if (!doc2 || doc2.body === null) {
+              window.open(url, '_blank');
+            }
+          } catch (e) { /* cross-origin ok means pdf loaded */ }
+        }, 800);
+        return;
+      }
+    } catch (e) {
+      console.warn('preview modal failed', e);
     }
+    window.open(url, '_blank');
   }
 
 
@@ -249,7 +262,7 @@ const PdfExport = (function () {
         { key: 'hsn', label: 'HSN/SAC\nCODE', w: 22, align: 'center' },
         { key: 'qty', label: 'Qty.', w: 16, align: 'center' },
         { key: 'rate', label: 'Unit Rate', w: 22, align: 'center' },
-        { key: 'disc', label: 'Disc.\nAmt', w: 16, align: 'center' },
+        { key: 'disc', label: 'Disc. %', w: 16, align: 'center' },
         { key: 'total', label: 'Amount\n(in Rupees)', w: 26, align: 'right' },
       ];
     }
@@ -308,15 +321,12 @@ const PdfExport = (function () {
     y = drawTableHeader(doc, y, cols, headerOpts);
 
     const items = data.totals.computed || [];
-    const n = Math.max(items.length, 1);
     const reserve = bottomReserve != null ? bottomReserve : 55;
-    const spaceForItems = Math.max(30, PAGE_H - MARGIN - reserve - y);
-    // Stretch rows so invoice fills the page like the reference
-    const stretchMin = isInvoice ? Math.max(36, spaceForItems / n) : 7;
+    // Compact rows (no per-item stretch). Extra space stays AFTER all items, before bank.
 
     items.forEach((it, idx) => {
       const descLines = doc.splitTextToSize(it.desc || '', cols[1].w - 3);
-      const rowH = Math.max(stretchMin, descLines.length * 3.6 + 4);
+      const rowH = Math.max(9, descLines.length * 3.6 + 4);
 
       if (y + rowH > PAGE_H - MARGIN - 20 && !isInvoice) {
         doc.addPage();
@@ -336,9 +346,7 @@ const PdfExport = (function () {
         hsn: it.hsn || '',
         qty: qtyStr,
         rate: Utils.fmtMoney(it.rate),
-        disc: isInvoice
-          ? Utils.fmtMoney(discAmt)
-          : (it.disc ? (Utils.fmtMoney(it.disc) + '%') : '0%'),
+        disc: (Number(it.disc) ? Utils.round2(Number(it.disc)) + '%' : '0%'),
         gst: it.gst + '%',
         gstAmt: Utils.fmtMoney(it.gstAmt),
         total: Utils.fmtMoney(it.taxable),
@@ -367,6 +375,12 @@ const PdfExport = (function () {
       });
       y += rowH;
     });
+
+    // Invoice: keep bank/QR block at bottom; empty area under items (not between items)
+    if (isInvoice) {
+      const bankStart = PAGE_H - MARGIN - reserve;
+      if (y < bankStart) y = bankStart;
+    }
 
     return y;
   }

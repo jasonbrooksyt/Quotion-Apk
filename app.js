@@ -316,6 +316,11 @@ const QGenApp = (function () {
     renumberRows();
   }
 
+  function ensureQuoteDate() {
+    const el = document.getElementById('quoteDate');
+    if (el && !el.value) el.value = Utils.todayISO();
+  }
+
   function loadDraftIntoForm() {
     const draft = Storage.loadDraft();
 
@@ -323,6 +328,7 @@ const QGenApp = (function () {
       addItem();
       document.getElementById('quoteDate').value = Utils.todayISO();
       document.getElementById('quoteNo').value = Utils.nextQuotationNumber(Storage.getLastQuoteNo());
+      ensureQuoteDate();
       const termsEl = document.getElementById('termsText');
       if (termsEl) termsEl.value = DEFAULT_TERMS || '';
       if (typeof SerialSync !== 'undefined') {
@@ -338,6 +344,7 @@ const QGenApp = (function () {
     }
 
     populateFormFromData(draft);
+    ensureQuoteDate();
   }
 
   // ---------- Saved customers ----------
@@ -785,26 +792,39 @@ const QGenApp = (function () {
       }
     });
 
-    document.getElementById('previewPdfBtn').addEventListener('click', async () => {
-      const errors = validate();
-      if (errors.length) { showErrors(errors); return; }
-      hideErrors();
-      const btn = document.getElementById('previewPdfBtn');
-      btn.disabled = true;
-      try {
-        const data = collectData();
-        data.meta.docType = (document.getElementById('docType') || {}).value || 'quotation';
-        if (data.meta.docType === 'invoice') {
-          data.terms = { deliveryTime: '', paymentTerms: '', remarks: '', termsText: [] };
+    const previewBtn = document.getElementById('previewPdfBtn');
+    if (previewBtn) {
+      previewBtn.addEventListener('click', async () => {
+        const errors = validate();
+        if (errors.length) { showErrors(errors); return; }
+        hideErrors();
+        previewBtn.disabled = true;
+        try {
+          if (typeof PdfExport === 'undefined' || !PdfExport.preview) {
+            toast('Preview not loaded — hard refresh / cache clear karo');
+            return;
+          }
+          const data = collectData();
+          data.meta.docType = (document.getElementById('docType') || {}).value || 'quotation';
+          if (data.meta.docType === 'invoice') {
+            data.terms = { deliveryTime: '', paymentTerms: '', remarks: '', termsText: [] };
+          }
+          // Ensure date present in data
+          if (!data.meta.date) {
+            data.meta.date = Utils.todayISO();
+            const de = document.getElementById('quoteDate');
+            if (de) de.value = data.meta.date;
+          }
+          toast('Preview ban raha hai…');
+          await PdfExport.preview(data);
+        } catch (e) {
+          console.error(e);
+          toast('Preview failed: ' + (e.message || e));
+        } finally {
+          previewBtn.disabled = false;
         }
-        await PdfExport.preview(data);
-      } catch (e) {
-        console.error(e);
-        toast('Preview failed: ' + (e.message || e));
-      } finally {
-        btn.disabled = false;
-      }
-    });
+      });
+    }
 
     const previewClose = document.getElementById('previewCloseBtn');
     const previewModal = document.getElementById('previewModal');
@@ -908,6 +928,7 @@ const QGenApp = (function () {
     wireStaticControls();
     wireCustomerPicker();
     loadDraftIntoForm();
+    ensureQuoteDate();
     refreshHistoryList();
     recalcAll();
     updateCloudStatus();

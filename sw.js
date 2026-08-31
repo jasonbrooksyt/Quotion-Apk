@@ -1,5 +1,5 @@
 /* sw.js — network-first so serial/PDF fixes deploy immediately */
-const CACHE_NAME = 'kmf-quotation-v6';
+const CACHE_NAME = 'kmf-quotation-v7';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
