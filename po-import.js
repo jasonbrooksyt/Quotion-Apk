@@ -1,5 +1,5 @@
 /* po-import.js — PO upload → PO No, Date, items.
- * 1) Optional Gemini AI (set GEMINI_API_KEY in serial-config.js) for accurate parse
+ * 1) Optional Gemini AI — key localStorage (phone) se, serial-config mein nahi
  * 2) Fallback: improved heuristics (unit rate vs line total)
  */
 
@@ -237,6 +237,10 @@ const PoImport = (function () {
 
   // ---------- Gemini AI parse ----------
   function getGeminiKey() {
+    try {
+      const local = localStorage.getItem('kmf_gemini_key');
+      if (local && local.trim().length > 10) return local.trim();
+    } catch (e) {}
     if (typeof GEMINI_API_KEY === 'string' && GEMINI_API_KEY.trim().length > 10) {
       return GEMINI_API_KEY.trim();
     }

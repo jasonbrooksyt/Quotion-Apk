@@ -430,3 +430,11 @@ label > select{
 .btn--po-upload:disabled{opacity:.55;}
 .po-upload{margin-top:10px;}
 .po-upload .hint{margin-top:6px;font-size:11.5px;}
+
+.po-ai-details{margin-top:10px;font-size:12.5px;color:var(--muted);}
+.po-ai-details summary{cursor:pointer;font-weight:700;color:var(--teal-deep);}
+.po-ai-label{margin-top:8px;}
+.po-ai-actions{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;}
+.po-ai-actions .btn--po-upload{margin-top:0;}
+
+#geminiStatus{margin:8px 0 0;font-size:12px;font-weight:700;}

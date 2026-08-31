@@ -827,6 +827,55 @@ const QGenApp = (function () {
     }
 
 
+
+    // Gemini key — localStorage only (never commit to GitHub)
+    (function wireGeminiKey() {
+      const input = document.getElementById('geminiKeyInput');
+      const saveBtn = document.getElementById('geminiKeySaveBtn');
+      const clearBtn = document.getElementById('geminiKeyClearBtn');
+      const status = document.getElementById('geminiStatus');
+      function refreshGeminiStatus() {
+        let on = false;
+        try { on = !!(localStorage.getItem('kmf_gemini_key') || '').trim(); } catch (e) {}
+        if (status) {
+          status.textContent = on
+            ? 'AI: On (is phone pe key save hai) — PO upload accurate hoga'
+            : 'AI: Off — key is phone pe save karo for better PO extract';
+          status.style.color = on ? '#059669' : '';
+        }
+      }
+      if (!input) return;
+      try {
+        const existing = localStorage.getItem('kmf_gemini_key') || '';
+        if (existing) input.placeholder = 'Key saved — nayi key se replace kar sakte ho';
+      } catch (e) {}
+      refreshGeminiStatus();
+      if (saveBtn) {
+        saveBtn.addEventListener('click', () => {
+          const v = (input.value || '').trim();
+          if (v.length < 10) { toast('Valid Gemini key paste karo'); return; }
+          try {
+            localStorage.setItem('kmf_gemini_key', v);
+            input.value = '';
+            input.placeholder = 'Key saved — nayi key se replace kar sakte ho';
+            refreshGeminiStatus();
+            toast('AI key is phone pe save ho gayi ✓');
+          } catch (e) {
+            toast('Save fail');
+          }
+        });
+      }
+      if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+          try { localStorage.removeItem('kmf_gemini_key'); } catch (e) {}
+          input.value = '';
+          input.placeholder = 'New key paste karo';
+          refreshGeminiStatus();
+          toast('AI key clear — ab heuristic parser chalega');
+        });
+      }
+    })();
+
     // ---- PO Upload auto-fill (no Bill To / customer) ----
     const poUploadBtn = document.getElementById('poUploadBtn');
     const poFileInput = document.getElementById('poFileInput');

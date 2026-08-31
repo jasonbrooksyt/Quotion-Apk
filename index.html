@@ -149,6 +149,20 @@
         <input type="file" id="poFileInput" accept="application/pdf,image/*" class="hidden" />
         <button type="button" class="btn btn--po-upload" id="poUploadBtn">📄 Upload PO</button>
         <p class="hint" id="poUploadHint">PDF / photo se PO No, Date, items &amp; rate auto bharega. Customer (Bill To) khud select karo.</p>
+        <p class="hint" id="geminiStatus">AI: Off (key is phone pe save karo for better PO extract)</p>
+        <details class="po-ai-details" id="geminiKeyPanel">
+          <summary>⚙ AI key — is phone pe only (GitHub pe mat daalo)</summary>
+          <label class="po-ai-label">Gemini API key
+            <input type="password" id="geminiKeyInput" placeholder="New key paste karo" autocomplete="off" />
+          </label>
+          <div class="po-ai-actions">
+            <button type="button" class="btn btn--po-upload" id="geminiKeySaveBtn">Save on this phone</button>
+            <button type="button" class="btn btn--ghost" id="geminiKeyClearBtn" style="width:auto;margin:0;padding:8px 12px;font-size:12px">Clear</button>
+          </div>
+          <p class="hint">1) <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> se key banao<br/>
+          2) Yahan paste → Save<br/>
+          3) Sirf is phone/browser mein rehti hai</p>
+        </details>
       </div>
     </div>
   </section>
