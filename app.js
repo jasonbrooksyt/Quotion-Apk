@@ -887,9 +887,10 @@ const QGenApp = (function () {
               return;
             }
             toast('AI key test…');
-            await PoImport.testGeminiKey();
+            const tr = await PoImport.testGeminiKey();
             refreshGeminiStatus();
-            toast('AI key OK ✓ — ab PO upload try karo');
+            const m = (tr && tr.model) ? tr.model : '';
+            toast('AI key OK ✓' + (m ? (' · ' + m) : '') + ' — ab PO upload try karo');
           } catch (e) {
             console.error(e);
             toast('AI key fail: ' + (e.message || e));

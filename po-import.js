@@ -57,19 +57,23 @@ const PoImport = (function () {
     a = Number(a) || 0;
     b = Number(b) || 0;
     if (qty <= 0) return { qty: 0, rate: 0 };
-    // a = rate, b = line total
+    // Prefer pair where unit_rate * qty ≈ line_total
     if (a > 0 && b > 0) {
-      const errA = Math.abs(a * qty - b);
-      const errB = Math.abs(b * qty - a);
-      if (errA <= errB && errA <= Math.max(2, b * 0.08)) return { qty, rate: a };
-      if (errB < errA && errB <= Math.max(2, a * 0.08)) return { qty, rate: b };
-      // typical: rate < line total
-      if (a < b) return { qty, rate: a };
-      return { qty, rate: b };
+      const errA = Math.abs(a * qty - b); // a is unit rate
+      const errB = Math.abs(b * qty - a); // b is unit rate
+      if (errA <= errB && errA <= Math.max(5, b * 0.1)) return { qty, rate: a };
+      if (errB < errA && errB <= Math.max(5, a * 0.1)) return { qty, rate: b };
+      // typical PO: unit rate < line total
+      const lo = Math.min(a, b);
+      const hi = Math.max(a, b);
+      if (lo >= 10 && Math.abs(lo * qty - hi) <= Math.max(5, hi * 0.1)) return { qty, rate: lo };
+      if (hi >= 10) return { qty, rate: lo >= 10 ? lo : hi };
+      return { qty, rate: lo };
     }
     if (a > 0 && b <= 0) {
-      // single amount — if looks like total, derive rate
-      if (qty > 1 && a / qty >= 1) return { qty, rate: Math.round((a / qty) * 100) / 100 };
+      // reject tiny "rates" that are really qty echoes (e.g. rate=2)
+      if (a < 10 && qty >= 1) return { qty, rate: 0 };
+      if (qty > 1 && a / qty >= 10) return { qty, rate: Math.round((a / qty) * 100) / 100 };
       return { qty, rate: a };
     }
     return { qty, rate: 0 };
@@ -360,12 +364,23 @@ const PoImport = (function () {
 
     const prompt = buildPoPrompt(text);
     // Try models in order (AI Studio free tier)
-    const models = [
-      'gemini-2.0-flash',
-      'gemini-1.5-flash',
-      'gemini-1.5-flash-latest',
-      'gemini-1.5-flash-8b',
+    // 2026: 2.0 / 1.5 shut down — use 3.x Flash; also try API list
+    let models = [
+      'gemini-3.5-flash-lite',
+      'gemini-3.5-flash',
+      'gemini-3.6-flash',
+      'gemini-3.7-flash',
+      'gemini-2.5-flash',
     ];
+    try {
+      const listed = await listGeminiModels(key);
+      if (listed.length) {
+        const ordered = models.filter((p) => listed.some((l) => l === p || l.startsWith(p)));
+        models = ordered.length ? ordered.concat(listed.filter((l) => !ordered.includes(l)).slice(0, 3)) : listed.slice(0, 6);
+      }
+    } catch (e) {
+      console.warn('[PO import] list models', e);
+    }
     let lastErr = null;
     for (const model of models) {
       try {
@@ -404,15 +419,58 @@ const PoImport = (function () {
   }
 
   /** Quick key test for UI */
+  async function listGeminiModels(key) {
+    const url =
+      'https://generativelanguage.googleapis.com/v1beta/models?key=' +
+      encodeURIComponent(key);
+    const res = await fetch(url);
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error('List models fail: ' + res.status + ' ' + body.slice(0, 120));
+    }
+    const data = await res.json();
+    const names = [];
+    (data.models || []).forEach((m) => {
+      const id = String(m.name || '').replace(/^models\//, '');
+      const actions = m.supportedGenerationMethods || m.supported_actions || [];
+      if (actions.includes('generateContent') || !actions.length) {
+        if (/gemini/i.test(id) && !/embed|image|tts|live/i.test(id)) names.push(id);
+      }
+    });
+    return names;
+  }
+
   async function testGeminiKey() {
     const key = getGeminiKey();
     if (!key) throw new Error('Pehle key Save on this phone karo');
-    const txt = await callGeminiModel(
-      key,
-      'gemini-2.0-flash',
-      'Reply with JSON only: {"ok":true}'
-    );
-    return txt;
+    const preferred = [
+      'gemini-3.5-flash-lite',
+      'gemini-3.5-flash',
+      'gemini-3.6-flash',
+      'gemini-3.7-flash',
+      'gemini-2.5-flash',
+    ];
+    let models = preferred;
+    try {
+      const listed = await listGeminiModels(key);
+      if (listed.length) {
+        // prefer listed that match preferred order
+        const ordered = preferred.filter((p) => listed.some((l) => l === p || l.startsWith(p)));
+        models = ordered.length ? ordered : listed.slice(0, 5);
+      }
+    } catch (e) {
+      console.warn('list models', e);
+    }
+    let lastErr = null;
+    for (const model of models) {
+      try {
+        const txt = await callGeminiModel(key, model, 'Reply with JSON only: {"ok":true}');
+        return { ok: true, model, txt };
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error('No working Gemini model');
   }
 
   async function loadPdfJs() {
