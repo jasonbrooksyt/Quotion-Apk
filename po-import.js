@@ -236,9 +236,38 @@ const PoImport = (function () {
       return true;
     }).slice(0, 30);
 
+    if (result.items[0]) result.subject = shortSubject(result.items[0].desc);
+
     return result;
   }
 
+
+
+  /** Short subject from item description — e.g. "Mobile Tablet for Barcode scanner" → "Tablet supply" */
+  function shortSubject(desc) {
+    const d = String(desc || '').replace(/\s+/g, ' ').trim();
+    if (!d) return '';
+    const lower = d.toLowerCase();
+    // Known product shortcuts
+    if (/tablet/i.test(d) && /barcode|scanner|mobile/i.test(d)) return 'Tablet supply';
+    if (/tablet/i.test(d)) return 'Tablet supply';
+    if (/scanner/i.test(d)) return 'Scanner supply';
+    if (/fabricat|ss\b|steel|structure|welding/i.test(d)) return 'Fabrication work';
+    if (/motor|pump|gear/i.test(d)) return 'Equipment supply';
+    if (/cable|wire/i.test(d)) return 'Cable supply';
+    if (/panel|electrical/i.test(d)) return 'Panel work';
+    // Generic: first 2–4 meaningful words, max ~40 chars
+    const stop = new Set(['for', 'and', 'the', 'with', 'from', 'of', 'a', 'an', 'to', 'in', 'on']);
+    const words = d.split(' ').filter((w) => w && !stop.has(w.toLowerCase()));
+    let s = words.slice(0, 3).join(' ');
+    if (s.length > 40) s = s.slice(0, 37).trim() + '…';
+    // Prefer "... supply" if looks like a product name
+    if (words.length && !/work|service|job|supply|repair/i.test(s)) {
+      const core = words.slice(0, 2).join(' ');
+      if (core.length <= 28) s = core + ' supply';
+    }
+    return s;
+  }
 
   // ---------- Gemini AI parse (key from phone localStorage) ----------
   function getGeminiKey() {
@@ -377,9 +406,13 @@ const PoImport = (function () {
       poDate = parseDateToISO(poDate) || '';
     }
 
+    let subject = String(parsed.subject || '').trim().slice(0, 60);
+    if (!subject && items[0]) subject = shortSubject(items[0].desc);
+
     return {
       poNumber: String(parsed.poNumber || '').trim(),
       poDate,
+      subject,
       items,
       rawSnippet: (text || '').slice(0, 400),
       source: 'ai',
@@ -604,5 +637,5 @@ const PoImport = (function () {
     return heuristic;
   }
 
-  return { importFile, parsePoText: parsePoTextHeuristic, testGeminiKey, getGeminiKey };
+  return { importFile, parsePoText: parsePoTextHeuristic, testGeminiKey, getGeminiKey, shortSubject };
 })();

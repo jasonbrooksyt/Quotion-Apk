@@ -838,16 +838,14 @@ const QGenApp = (function () {
         let on = false;
         try { on = !!(localStorage.getItem('kmf_gemini_key') || '').trim(); } catch (e) {}
         if (status) {
-          status.textContent = on
-            ? 'AI: On (is phone pe key save hai) — PO upload accurate hoga'
-            : 'AI: Off — key is phone pe save karo for better PO extract';
+          status.textContent = on ? 'AI: On' : 'AI: Off';
           status.style.color = on ? '#059669' : '';
         }
       }
       if (!input) return;
       try {
         const existing = localStorage.getItem('kmf_gemini_key') || '';
-        if (existing) input.placeholder = 'Key saved — nayi key se replace kar sakte ho';
+        if (existing) input.placeholder = 'Key saved';
       } catch (e) {}
       refreshGeminiStatus();
       if (saveBtn) {
@@ -857,9 +855,9 @@ const QGenApp = (function () {
           try {
             localStorage.setItem('kmf_gemini_key', v);
             input.value = '';
-            input.placeholder = 'Key saved — nayi key se replace kar sakte ho';
+            input.placeholder = 'Key saved';
             refreshGeminiStatus();
-            toast('AI key is phone pe save ho gayi ✓');
+            toast('AI key saved');
           } catch (e) {
             toast('Save fail');
           }
@@ -871,7 +869,7 @@ const QGenApp = (function () {
           input.value = '';
           input.placeholder = 'New key paste karo';
           refreshGeminiStatus();
-          toast('AI key clear — ab heuristic parser chalega');
+          toast('AI key cleared');
         });
       }
       const testBtn = document.getElementById('geminiKeyTestBtn');
@@ -890,7 +888,7 @@ const QGenApp = (function () {
             const tr = await PoImport.testGeminiKey();
             refreshGeminiStatus();
             const m = (tr && tr.model) ? tr.model : '';
-            toast('AI key OK ✓' + (m ? (' · ' + m) : '') + ' — ab PO upload try karo');
+            toast('AI key OK' + (m ? (' · ' + m) : ''));
           } catch (e) {
             console.error(e);
             toast('AI key fail: ' + (e.message || e));
@@ -930,7 +928,6 @@ const QGenApp = (function () {
             const el = document.getElementById('poDate');
             if (el) el.value = parsed.poDate;
           }
-          // Subject: never auto-fill from PO (manual only)
           // Items — replace rows (customer untouched)
           if (parsed.items && parsed.items.length) {
             itemsWrap.innerHTML = '';
@@ -947,23 +944,28 @@ const QGenApp = (function () {
             });
             renumberRows();
             recalcAll();
+            // Subject = short form of first item description (e.g. Tablet supply)
+            const subEl = document.getElementById('subject');
+            if (subEl) {
+              const shortSub = parsed.subject
+                || (typeof PoImport !== 'undefined' && PoImport.shortSubject
+                      ? PoImport.shortSubject(parsed.items[0].desc)
+                      : '');
+              if (shortSub) subEl.value = shortSub;
+            }
           }
           autosave();
           const n = (parsed.items || []).length;
-          let msg = 'PO import' + (parsed.source === 'ai' ? ' (AI ✓)' : ' (basic)') + ': '
-            + (parsed.poNumber ? ('No ' + parsed.poNumber) : 'No?')
-            + (parsed.poDate ? (', Date ' + parsed.poDate) : '');
+          let msg = (parsed.source === 'ai' ? 'Imported' : 'Imported (basic)') + ': '
+            + (parsed.poNumber || '—');
           if (n) {
             const r0 = parsed.items[0];
-            msg += ', ' + n + ' item(s)';
-            if (r0) msg += ' · rate ₹' + r0.rate + (r0.desc ? (' · ' + String(r0.desc).slice(0, 28)) : '');
+            msg += ' · ' + n + ' item(s)';
+            if (r0 && r0.rate) msg += ' · ₹' + r0.rate;
           } else {
-            msg += ', items nahi mile — manual daalo';
+            msg += ' · no items';
           }
-          if (parsed.aiError) {
-            msg += ' | AI fail: ' + String(parsed.aiError).slice(0, 80);
-          }
-          msg += '. Customer khud select karo.';
+          if (parsed.aiError) msg += ' · AI: ' + String(parsed.aiError).slice(0, 60);
           toast(msg);
           if (hint) hint.textContent = msg;
         } catch (e) {
