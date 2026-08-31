@@ -874,6 +874,31 @@ const QGenApp = (function () {
           toast('AI key clear — ab heuristic parser chalega');
         });
       }
+      const testBtn = document.getElementById('geminiKeyTestBtn');
+      if (testBtn) {
+        testBtn.addEventListener('click', async () => {
+          testBtn.disabled = true;
+          try {
+            // save typed key first if present
+            const v = (input.value || '').trim();
+            if (v.length > 10) localStorage.setItem('kmf_gemini_key', v);
+            if (typeof PoImport === 'undefined' || !PoImport.testGeminiKey) {
+              toast('po-import.js update karo');
+              return;
+            }
+            toast('AI key test…');
+            await PoImport.testGeminiKey();
+            refreshGeminiStatus();
+            toast('AI key OK ✓ — ab PO upload try karo');
+          } catch (e) {
+            console.error(e);
+            toast('AI key fail: ' + (e.message || e));
+            refreshGeminiStatus();
+          } finally {
+            testBtn.disabled = false;
+          }
+        });
+      }
     })();
 
     // ---- PO Upload auto-fill (no Bill To / customer) ----
@@ -924,11 +949,19 @@ const QGenApp = (function () {
           }
           autosave();
           const n = (parsed.items || []).length;
-          let msg = 'PO import' + (parsed.source === 'ai' ? ' (AI)' : '') + ': '
+          let msg = 'PO import' + (parsed.source === 'ai' ? ' (AI ✓)' : ' (basic)') + ': '
             + (parsed.poNumber ? ('No ' + parsed.poNumber) : 'No?')
             + (parsed.poDate ? (', Date ' + parsed.poDate) : '');
-          if (n) msg += ', ' + n + ' item(s)';
-          else msg += ', items nahi mile — manual daalo';
+          if (n) {
+            const r0 = parsed.items[0];
+            msg += ', ' + n + ' item(s)';
+            if (r0) msg += ' · rate ₹' + r0.rate + (r0.desc ? (' · ' + String(r0.desc).slice(0, 28)) : '');
+          } else {
+            msg += ', items nahi mile — manual daalo';
+          }
+          if (parsed.aiError) {
+            msg += ' | AI fail: ' + String(parsed.aiError).slice(0, 80);
+          }
           msg += '. Customer khud select karo.';
           toast(msg);
           if (hint) hint.textContent = msg;

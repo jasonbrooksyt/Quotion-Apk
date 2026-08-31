@@ -235,7 +235,8 @@ const PoImport = (function () {
     return result;
   }
 
-  // ---------- Gemini AI parse ----------
+
+  // ---------- Gemini AI parse (key from phone localStorage) ----------
   function getGeminiKey() {
     try {
       const local = localStorage.getItem('kmf_gemini_key');
@@ -247,69 +248,95 @@ const PoImport = (function () {
     return '';
   }
 
-  async function parsePoWithGemini(text) {
-    const key = getGeminiKey();
-    if (!key) return null;
-
-    const prompt =
-      'You extract purchase order data for an Indian tax invoice form.\n' +
-      'From the PO text below, return ONLY valid JSON (no markdown) with this shape:\n' +
+  function buildPoPrompt(text) {
+    return (
+      'Extract line items from this Indian Purchase Order for a tax invoice.\n' +
+      'Return ONLY a JSON object (no markdown, no explanation):\n' +
       '{\n' +
-      '  "poNumber": "string",\n' +
+      '  "poNumber": "",\n' +
       '  "poDate": "YYYY-MM-DD",\n' +
       '  "items": [\n' +
-      '    { "desc": "material description only", "qty": number, "rate": number, "unit": "AU", "hsn": "string", "gst": 18 }\n' +
+      '    { "desc": "", "qty": 0, "rate": 0, "unit": "AU", "hsn": "", "gst": 18 }\n' +
       '  ]\n' +
-      '}\n' +
-      'Rules:\n' +
-      '- rate = UNIT rate (per piece), NOT line total / price amount\n' +
-      '- If qty=2 and amount=39500 and rate column=19750, use rate 19750\n' +
-      '- Do NOT include Bill To, Ship To, supplier address, GST lines, freight-only notes as items\n' +
-      '- desc = product/service name only (not payment terms)\n' +
-      '- poDate is PO date, not delivery date\n' +
-      '- hsn if present else ""\n' +
-      '- unit default AU\n\n' +
+      '}\n\n' +
+      'CRITICAL rules:\n' +
+      '1. rate = UNIT RATE per piece (column RATE / Unit Rate), NEVER the line PRICE/AMOUNT total.\n' +
+      '   Example: Qty 2, Rate 19750.00, Price 39500.00 → rate must be 19750, not 39500.\n' +
+      '2. If only one money value and qty>1, rate = amount/qty.\n' +
+      '3. desc = product name only (e.g. "Mobile Tablet for Barcode scanner").\n' +
+      '   Do NOT put payment terms, Redmi specs from notes, freight notes as the only desc unless that is the item.\n' +
+      '4. Ignore: Bill To, Ship To, supplier address, CGST/SGST %, freight-only lines, grand total rows.\n' +
+      '5. poDate = PO header Date, not Delivery Date.\n' +
+      '6. unit = AU if PO says AU, else Nos/Each as written.\n' +
+      '7. hsn = HSN/SAC code if present (usually 6-8 digits like 85446020), else "".\n\n' +
       'PO TEXT:\n' +
-      text.slice(0, 12000);
+      text.slice(0, 14000)
+    );
+  }
 
+  async function callGeminiModel(key, model, prompt) {
     const url =
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' +
+      'https://generativelanguage.googleapis.com/v1beta/models/' +
+      model +
+      ':generateContent?key=' +
       encodeURIComponent(key);
-
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0,
+          maxOutputTokens: 2048,
+          responseMimeType: 'application/json',
+        },
       }),
     });
+    const errBody = !res.ok ? await res.text().catch(() => '') : '';
     if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      throw new Error('AI parse failed: ' + res.status + ' ' + errText.slice(0, 120));
+      let msg = 'HTTP ' + res.status;
+      try {
+        const j = JSON.parse(errBody);
+        msg = (j.error && j.error.message) || msg;
+      } catch (e) {
+        if (errBody) msg = errBody.slice(0, 160);
+      }
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
     }
     const data = await res.json();
-    const raw =
-      (((data || {}).candidates || [])[0] || {}).content ||
-      {};
-    const parts = raw.parts || [];
+    // blocked / empty
+    const cand = ((data || {}).candidates || [])[0] || {};
+    if (cand.finishReason && /SAFETY|RECITATION/i.test(cand.finishReason)) {
+      throw new Error('AI blocked response: ' + cand.finishReason);
+    }
+    const parts = ((cand.content || {}).parts) || [];
     let txt = parts.map((p) => p.text || '').join('\n').trim();
-    txt = txt.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
-    const jsonMatch = txt.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('AI ne JSON nahi diya');
-    const parsed = JSON.parse(jsonMatch[0]);
+    if (!txt && data.promptFeedback) {
+      throw new Error('AI empty: ' + JSON.stringify(data.promptFeedback).slice(0, 120));
+    }
+    return txt;
+  }
 
+  function normalizeAiResult(parsed, text) {
     const items = Array.isArray(parsed.items)
       ? parsed.items
-          .map((it) => ({
-            desc: String(it.desc || '').trim().slice(0, 200),
-            qty: Number(it.qty) || 0,
-            rate: Number(it.rate) || 0,
-            unit: String(it.unit || 'AU').trim() || 'AU',
-            hsn: String(it.hsn || '').trim(),
-            disc: 0,
-            gst: Number(it.gst) >= 0 ? Number(it.gst) : 18,
-          }))
+          .map((it) => {
+            let qty = Number(it.qty) || 0;
+            let rate = Number(it.rate) || 0;
+            // Safety: if rate looks like line total (rate ≈ qty * something common mistake)
+            // leave as-is; prompt already insists unit rate
+            return {
+              desc: String(it.desc || '').trim().slice(0, 200),
+              qty,
+              rate,
+              unit: String(it.unit || 'AU').trim() || 'AU',
+              hsn: String(it.hsn || '').replace(/\D/g, '').slice(0, 8),
+              disc: 0,
+              gst: Number(it.gst) >= 0 ? Number(it.gst) : 18,
+            };
+          })
           .filter((it) => it.desc && it.qty > 0 && it.rate > 0)
       : [];
 
@@ -322,9 +349,70 @@ const PoImport = (function () {
       poNumber: String(parsed.poNumber || '').trim(),
       poDate,
       items,
-      rawSnippet: text.slice(0, 400),
+      rawSnippet: (text || '').slice(0, 400),
       source: 'ai',
     };
+  }
+
+  async function parsePoWithGemini(text) {
+    const key = getGeminiKey();
+    if (!key) return null;
+
+    const prompt = buildPoPrompt(text);
+    // Try models in order (AI Studio free tier)
+    const models = [
+      'gemini-2.0-flash',
+      'gemini-1.5-flash',
+      'gemini-1.5-flash-latest',
+      'gemini-1.5-flash-8b',
+    ];
+    let lastErr = null;
+    for (const model of models) {
+      try {
+        let txt = await callGeminiModel(key, model, prompt);
+        txt = String(txt || '')
+          .replace(/^```json\s*/i, '')
+          .replace(/^```\s*/i, '')
+          .replace(/\s*```$/i, '')
+          .trim();
+        const jsonMatch = txt.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+          lastErr = new Error('AI JSON missing (' + model + ')');
+          continue;
+        }
+        const parsed = JSON.parse(jsonMatch[0]);
+        const result = normalizeAiResult(parsed, text);
+        result.model = model;
+        if (!result.poNumber && !(result.items && result.items.length)) {
+          lastErr = new Error('AI empty items (' + model + ')');
+          continue;
+        }
+        return result;
+      } catch (e) {
+        lastErr = e;
+        // 400 API key invalid — no point trying other models
+        const msg = String(e.message || e);
+        if (/API key|invalid|PERMISSION|403|401/i.test(msg) && e.status !== 404) {
+          break;
+        }
+        continue;
+      }
+    }
+    const err = lastErr || new Error('AI parse failed');
+    err.isAi = true;
+    throw err;
+  }
+
+  /** Quick key test for UI */
+  async function testGeminiKey() {
+    const key = getGeminiKey();
+    if (!key) throw new Error('Pehle key Save on this phone karo');
+    const txt = await callGeminiModel(
+      key,
+      'gemini-2.0-flash',
+      'Reply with JSON only: {"ok":true}'
+    );
+    return txt;
   }
 
   async function loadPdfJs() {
@@ -407,7 +495,7 @@ const PoImport = (function () {
       console.log('[PO import] text sample:', text.slice(0, 800));
     } catch (e) {}
 
-    // AI first (if key set)
+    // AI first (if key set on this phone)
     if (getGeminiKey()) {
       try {
         const ai = await parsePoWithGemini(text);
@@ -417,6 +505,11 @@ const PoImport = (function () {
         }
       } catch (e) {
         console.warn('[PO import] AI failed, using heuristic', e);
+        const heuristic = parsePoTextHeuristic(text);
+        heuristic.source = 'heuristic';
+        heuristic.aiError = String(e.message || e);
+        try { console.log('[PO import] heuristic:', heuristic); } catch (e2) {}
+        return heuristic;
       }
     }
 
@@ -426,5 +519,5 @@ const PoImport = (function () {
     return heuristic;
   }
 
-  return { importFile, parsePoText: parsePoTextHeuristic };
+  return { importFile, parsePoText: parsePoTextHeuristic, testGeminiKey, getGeminiKey };
 })();
