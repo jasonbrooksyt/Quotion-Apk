@@ -342,17 +342,20 @@ const PdfExport = (function () {
       doc.setFontSize(8);
       const descCol = cols.find((c) => c.key === 'desc') || cols[1];
       const descMaxW = Math.max(8, descCol.w - 3.5);
-      let descLines = doc.splitTextToSize(String(it.desc || ''), descMaxW);
-      // Cap lines so row stays readable; last line ellipsis if clipped
-      const maxDescLines = 6;
-      if (descLines.length > maxDescLines) {
-        descLines = descLines.slice(0, maxDescLines);
-        const last = String(descLines[maxDescLines - 1] || '');
-        descLines[maxDescLines - 1] = last.length > 3 ? last.slice(0, -3) + '...' : last + '...';
+      // Full description — no "..." cut-off (quotation can be multi-line work scope)
+      let descLines = doc.splitTextToSize(String(it.desc || '').replace(/\r\n/g, '\n'), descMaxW);
+      if (!Array.isArray(descLines)) descLines = [String(descLines || '')];
+      // Invoice: soft cap only if extremely long; quotation: show all lines
+      if (isInvoice && descLines.length > 20) {
+        descLines = descLines.slice(0, 20);
+        descLines[19] = String(descLines[19] || '').replace(/\s+$/, '') + '...';
       }
-      const rowH = Math.max(9, descLines.length * 3.4 + 4);
+      const lineH = 3.5;
+      const rowH = Math.max(10, descLines.length * lineH + 5);
 
-      if (y + rowH > PAGE_H - MARGIN - 20 && !isInvoice) {
+      // Page break before row if it won't fit (quotations / multi-page)
+      const pageLimit = PAGE_H - MARGIN - (isInvoice ? Math.min(reserve, 30) : 15);
+      if (y + Math.min(rowH, 40) > pageLimit) {
         doc.addPage();
         y = MARGIN;
         y = drawTableHeader(doc, y, cols, headerOpts);
@@ -389,7 +392,7 @@ const PdfExport = (function () {
           // Draw line-by-line (array form of text() can break later columns in jsPDF)
           const lines = Array.isArray(descLines) ? descLines : [String(descLines || '')];
           lines.forEach((ln, li) => {
-            doc.text(String(ln), x + 1.2, y + 4.2 + li * 3.4);
+            doc.text(String(ln), x + 1.2, y + 4.5 + li * 3.5);
           });
         } else if (c.key === 'sno') {
           doc.setFont(undefined, 'bold');
